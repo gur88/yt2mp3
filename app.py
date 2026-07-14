@@ -2,6 +2,7 @@ import re
 import subprocess
 import threading
 import time
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -107,46 +108,64 @@ def ffmpeg_codec_args(fmt: str, input_path: Path, quality: int) -> list[str]:
     elif fmt == "opus":
         # Copy opus stream if source is webm/opus
         if ext in (".webm", ".opus"):
-            return ["-vn", "-codec:a", "copy"]
+            return ["-codec:a", "copy"]
         return ["-codec:a", "libopus", "-b:a", "160k"]
     return []
 
 
+def _build_ffmpeg_cmd(input_path: Path, output_path: Path, codec_args: list[str],
+                       thumbnail_path: Path | None) -> list[str]:
+    cmd = ["ffmpeg", "-y", "-i", str(input_path)]
+    if thumbnail_path:
+        cmd += ["-i", str(thumbnail_path), "-map", "0:a", "-map", "1:v"]
+    else:
+        # No cover to embed — make sure a video stream in the source (e.g. a
+        # thumbnail track inside a webm) isn't picked up by default.
+        cmd += ["-vn"]
+    cmd += codec_args
+    if thumbnail_path:
+        cmd += ["-c:v", "mjpeg", "-disposition:v:0", "attached_pic",
+                "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
+    cmd += ["-progress", "pipe:1", "-nostats", str(output_path)]
+    return cmd
+
+
 def run_ffmpeg_with_progress(job_id: str, input_path: Path, output_path: Path,
-                              duration: float, quality: int, fmt: str) -> bool:
+                              duration: float, quality: int, fmt: str,
+                              thumbnail_path: Path | None = None) -> bool:
     """
     Run ffmpeg and parse its -progress output to update jobs[job_id]['percent']
-    from 90.00 → 99.99 during conversion.
+    from 90.00 → 99.99 during conversion. If thumbnail_path is given, embeds it
+    as cover art; on failure, retries once without the cover so a container/codec
+    quirk with the thumbnail doesn't break the whole conversion.
     """
     codec_args = ffmpeg_codec_args(fmt, input_path, quality)
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(input_path),
-        *codec_args,
-        "-progress", "pipe:1",
-        "-nostats",
-        str(output_path),
-    ]
+    def attempt(with_cover: bool) -> bool:
+        cmd = _build_ffmpeg_cmd(input_path, output_path, codec_args,
+                                 thumbnail_path if with_cover else None)
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        for line in proc.stdout:
+            line = line.strip()
+            if line.startswith("out_time_ms="):
+                try:
+                    ms = int(line.split("=")[1])
+                    if duration > 0 and ms >= 0:
+                        # Map 0..duration → 90.00..99.99
+                        conv_pct = min(100.0, (ms / 1_000_000) / duration * 100)
+                        jobs[job_id]["percent"] = round(90.0 + conv_pct * 0.0999, 2)
+                except (ValueError, ZeroDivisionError):
+                    pass
+        proc.wait()
+        return proc.returncode == 0
 
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-    )
-
-    for line in proc.stdout:
-        line = line.strip()
-        if line.startswith("out_time_ms="):
-            try:
-                ms = int(line.split("=")[1])
-                if duration > 0 and ms >= 0:
-                    # Map 0..duration → 90.00..99.99
-                    conv_pct = min(100.0, (ms / 1_000_000) / duration * 100)
-                    jobs[job_id]["percent"] = round(90.0 + conv_pct * 0.0999, 2)
-            except (ValueError, ZeroDivisionError):
-                pass
-
-    proc.wait()
-    return proc.returncode == 0
+    if thumbnail_path and attempt(with_cover=True):
+        return True
+    if thumbnail_path:
+        logger.warning("Cover art embed failed for %s, retrying without cover", input_path)
+    return attempt(with_cover=False)
 
 
 def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None:
@@ -175,6 +194,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
         # No yt-dlp postprocessors — we run ffmpeg manually for full progress
     }
 
+    thumb_path: Path | None = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info     = ydl.extract_info(url, download=True)
@@ -189,13 +209,24 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
                 raise FileNotFoundError("Downloaded audio file not found")
             input_path = candidates[0]
 
+        thumb_url = info.get("thumbnail")
+        if thumb_url:
+            thumb_path = OUTPUT_DIR / f"{job_id}_thumb"
+            try:
+                with urllib.request.urlopen(thumb_url, timeout=10) as resp:
+                    thumb_path.write_bytes(resp.read())
+            except Exception:
+                logger.warning("Could not fetch thumbnail for %s", job_id)
+                thumb_path = None
+
         # Output path
         ext         = FORMATS[fmt]["ext"]
         output_path = OUTPUT_DIR / f"{job_id}_out.{ext}"
 
         # Convert / remux with live progress
         jobs[job_id]["stage"] = "converting"
-        ok = run_ffmpeg_with_progress(job_id, input_path, output_path, duration, quality, fmt)
+        ok = run_ffmpeg_with_progress(job_id, input_path, output_path, duration, quality, fmt,
+                                       thumbnail_path=thumb_path)
 
         # Remove raw source file
         input_path.unlink(missing_ok=True)
@@ -214,12 +245,36 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"]  = str(e)
     finally:
+        if thumb_path:
+            thumb_path.unlink(missing_ok=True)
         release_concurrent_slot(ip)
 
 
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
+
+
+@app.route("/api/info", methods=["POST"])
+def get_info():
+    data = request.get_json(force=True)
+    url  = (data.get("url") or "").strip()
+
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        return jsonify({"error": "Не удалось получить информацию о видео. Проверьте ссылку."}), 400
+
+    return jsonify({
+        "title":     info.get("title"),
+        "artist":    info.get("artist") or info.get("uploader") or info.get("channel"),
+        "thumbnail": info.get("thumbnail"),
+        "duration":  info.get("duration"),
+    })
 
 
 @app.route("/api/download", methods=["POST"])

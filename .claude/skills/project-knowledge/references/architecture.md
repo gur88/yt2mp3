@@ -42,6 +42,19 @@ yt2mp3/
 | aac    | `.m4a`        | stream-copy if source is already `.m4a`/`.mp4`, else re-encode with `aac` @192k |
 | opus   | `.opus`       | stream-copy if source is `.webm`/`.opus`, else re-encode with `libopus` @160k |
 
+## Track Preview (`/api/info`)
+
+`POST /api/info {url}` runs `yt_dlp.extract_info(url, download=False)` — metadata only, no file ever touches disk — and returns `{title, artist, thumbnail, duration}` (`artist` falls back through `artist → uploader → channel`, since not every video sets an explicit artist tag). The frontend calls this on a 600ms debounce after the URL input changes (`static/index.html`), guarding against out-of-order responses with a `previewRequestId` counter so a stale response for an old URL can't overwrite the preview for a newer one.
+
+## Cover Art Embedding
+
+During conversion, `run_download` fetches `info["thumbnail"]` (already available from the same `extract_info` call used for the download) via `urllib.request` into a temp file, then `run_ffmpeg_with_progress` muxes it in as attached-picture cover art: second `-i` input, `-map 0:a -map 1:v`, `-c:v mjpeg -disposition:v:0 attached_pic`.
+
+- Works for **mp3** and **aac/m4a** — verified with `ffprobe` that `attached_pic=1` shows up in players like Яндекс Музыка
+- **Does not work for opus** — the `opus` muxer itself rejects a video stream (`Unsupported codec id in stream 1`), a hard ffmpeg limitation, not a bug to fix
+- `run_ffmpeg_with_progress` always tries with the cover first, and on ffmpeg failure retries once without it (`_build_ffmpeg_cmd`), logging a warning — this is what makes the opus case degrade to a plain audio file instead of breaking the conversion
+- **Gotcha already hit once:** the opus copy-path codec args used to hardcode `-vn` (added originally to strip the source webm's own video/thumbnail track when not embedding a cover). That flag silently discarded the mapped cover stream too, so the "failure" path never triggered and covers just silently vanished with no error or log. Fixed by only adding `-vn` when there's no `thumbnail_path` to map — when a cover *is* being embedded, the explicit `-map` calls already say exactly which streams go in, so `-vn` isn't needed and must not be added.
+
 ## Data Model
 
 None — no database. State is an in-memory `jobs: dict[str, dict]` in `app.py`, lost on process restart.
