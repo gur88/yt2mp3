@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT → Audio</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0f0f0f;
+      --surface: #1a1a1a;
+      --border:  #2a2a2a;
+      --accent:  #ff3b3b;
+      --accent2: #ff6b35;
+      --text:    #f0f0f0;
+      --muted:   #888;
+      --green:   #4caf7d;
+      --radius:  14px;
+    }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 560px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+    }
+
+    .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+    .logo-text { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo-text span { color: var(--accent); }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-size: 14px;
+      padding: 12px 16px;
+      outline: none;
+      transition: border-color .2s;
+      margin-bottom: 20px;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    .format-row { display: flex; gap: 8px; margin-bottom: 6px; }
+    .fmt-btn {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 10px 0 6px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .fmt-btn .fmt-sub { display: block; font-size: 10px; font-weight: 400; margin-top: 2px; opacity: .7; }
+    .fmt-btn.active { background: #2a0a0a; border-color: var(--accent); color: var(--accent); }
+    .fmt-btn:hover:not(.active) { border-color: #555; color: var(--text); }
+
+    .fmt-note { font-size: 12px; color: var(--muted); margin-top: 8px; margin-bottom: 20px; min-height: 16px; }
+    .fmt-note.good { color: var(--green); }
+
+    .quality-section { margin-bottom: 28px; }
+    .quality-row { display: flex; gap: 8px; margin-top: 8px; }
+    .q-btn {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 9px 0;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .q-btn.active { background: #2a0a0a; border-color: var(--accent); color: var(--accent); }
+    .q-btn:hover:not(.active) { border-color: #555; color: var(--text); }
+
+    .btn {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 14px;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+      letter-spacing: 0.02em;
+    }
+    .btn:hover { opacity: .9; }
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+    /* ── Progress ── */
+    .status-box { margin-top: 24px; display: none; }
+    .status-box.visible { display: block; }
+
+    .stage-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .stage-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .stage-label .dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-right: 6px;
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .3; }
+    }
+
+    .pct-display {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.5px;
+    }
+
+    .pct-display.done { color: var(--green); }
+
+    .progress-track {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      height: 8px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 99px;
+      transition: width .35s ease;
+      width: 0%;
+    }
+
+    .progress-fill.converting {
+      background: linear-gradient(90deg, #ff6b35, #ffa500);
+    }
+
+    .progress-fill.done-fill {
+      background: linear-gradient(90deg, #2d7a4f, var(--green));
+    }
+
+    .status-sub {
+      font-size: 12px;
+      color: var(--muted);
+      min-height: 16px;
+    }
+    .status-sub.error { color: #ff6b6b; }
+
+    .download-btn {
+      display: none;
+      width: 100%;
+      margin-top: 16px;
+      background: #1a2a1a;
+      border: 1px solid #2a4a2a;
+      border-radius: 10px;
+      color: var(--green);
+      font-size: 14px;
+      font-weight: 700;
+      padding: 13px;
+      cursor: pointer;
+      transition: background .2s;
+      letter-spacing: 0.02em;
+    }
+    .download-btn.visible { display: block; }
+    .download-btn:hover { background: #1f3a1f; }
+
+    .divider { height: 1px; background: var(--border); margin: 28px 0; }
+    .hint { font-size: 11px; color: #555; text-align: center; line-height: 1.6; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
+      <rect width="38" height="38" rx="10" fill="#1f0808"/>
+      <path d="M10 19C10 14 14.5 10 19 10C23.5 10 28 14 28 19C28 24 23.5 28 19 28C14.5 28 10 24 10 19Z" stroke="#ff3b3b" stroke-width="1.5"/>
+      <path d="M16.5 15.5L16.5 22.5L23.5 19L16.5 15.5Z" fill="#ff3b3b"/>
+      <path d="M7 30L31 30" stroke="#ff6b35" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="13" cy="33" r="2" fill="#ff6b35"/>
+      <circle cx="25" cy="33" r="2" fill="#ff6b35"/>
+      <rect x="11" y="30" width="4" height="3" fill="#1a1a1a"/>
+      <rect x="23" y="30" width="4" height="3" fill="#1a1a1a"/>
+    </svg>
+    <div class="logo-text">YT <span>→</span> Audio</div>
+  </div>
+
+  <label>Ссылка на YouTube</label>
+  <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." />
+
+  <label>Формат</label>
+  <div class="format-row" id="formatRow">
+    <button class="fmt-btn" data-fmt="mp3">MP3<span class="fmt-sub">универсальный</span></button>
+    <button class="fmt-btn active" data-fmt="aac">AAC (.m4a)<span class="fmt-sub">Яндекс Музыка ★</span></button>
+    <button class="fmt-btn" data-fmt="opus">Opus (.opus)<span class="fmt-sub">лучшее сжатие</span></button>
+  </div>
+  <div class="fmt-note good" id="fmtNote">✓ Без перекодирования — оригинальное качество YouTube</div>
+
+  <div class="quality-section" id="qualitySection" style="display:none">
+    <label>Качество (kbps)</label>
+    <div class="quality-row" id="qualityRow">
+      <button class="q-btn" data-q="128">128</button>
+      <button class="q-btn active" data-q="192">192</button>
+      <button class="q-btn" data-q="256">256</button>
+      <button class="q-btn" data-q="320">320</button>
+    </div>
+  </div>
+
+  <button class="btn" id="startBtn">Скачать аудио</button>
+
+  <!-- Status block -->
+  <div class="status-box" id="statusBox">
+    <div class="stage-row">
+      <div class="stage-label" id="stageLabel"><span class="dot"></span>Подготовка</div>
+      <div class="pct-display" id="pctDisplay">0.00%</div>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="status-sub" id="statusSub"></div>
+    <button class="download-btn" id="downloadBtn">⬇ Скачать файл</button>
+  </div>
+
+  <div class="divider"></div>
+  <div class="hint">
+    Видеофайл не скачивается — только аудиопоток.<br/>
+    Работает с YouTube, YouTube Music и большинством других сайтов.
+  </div>
+</div>
+
+<script>
+  const urlInput     = document.getElementById('urlInput');
+  const startBtn     = document.getElementById('startBtn');
+  const statusBox    = document.getElementById('statusBox');
+  const stageLabel   = document.getElementById('stageLabel');
+  const pctDisplay   = document.getElementById('pctDisplay');
+  const progressFill = document.getElementById('progressFill');
+  const statusSub    = document.getElementById('statusSub');
+  const downloadBtn  = document.getElementById('downloadBtn');
+  const formatRow    = document.getElementById('formatRow');
+  const fmtNote      = document.getElementById('fmtNote');
+  const qualitySection = document.getElementById('qualitySection');
+  const qualityRow   = document.getElementById('qualityRow');
+
+  let selectedFmt     = 'aac';
+  let selectedQuality = 192;
+  let pollTimer       = null;
+
+  const fmtNotes = {
+    mp3:  { text: 'Конвертация из opus/aac → небольшая потеря качества', cls: '' },
+    aac:  { text: '✓ Без перекодирования — оригинальное качество YouTube', cls: 'good' },
+    opus: { text: '✓ Без перекодирования — наилучшее сжатие при том же качестве', cls: 'good' },
+  };
+
+  formatRow.addEventListener('click', e => {
+    const btn = e.target.closest('.fmt-btn');
+    if (!btn) return;
+    formatRow.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedFmt = btn.dataset.fmt;
+    const n = fmtNotes[selectedFmt];
+    fmtNote.textContent = n.text;
+    fmtNote.className = 'fmt-note' + (n.cls ? ' ' + n.cls : '');
+    qualitySection.style.display = selectedFmt === 'mp3' ? 'block' : 'none';
+  });
+
+  qualityRow.addEventListener('click', e => {
+    const btn = e.target.closest('.q-btn');
+    if (!btn) return;
+    qualityRow.querySelectorAll('.q-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedQuality = parseInt(btn.dataset.q);
+  });
+
+  function setStage(stage, pct, sub) {
+    const labels = {
+      pending:     'Подготовка',
+      downloading: 'Скачивание аудиопотока',
+      converting:  'Конвертация',
+      done:        'Готово',
+    };
+
+    const dotHtml = stage === 'done' ? '' : '<span class="dot"></span>';
+    stageLabel.innerHTML = dotHtml + (labels[stage] || stage);
+
+    progressFill.style.width = pct + '%';
+    progressFill.className = 'progress-fill' +
+      (stage === 'converting' ? ' converting' : '') +
+      (stage === 'done' ? ' done-fill' : '');
+
+    pctDisplay.textContent = stage === 'done' ? '✓' : pct.toFixed(2) + '%';
+    pctDisplay.className = 'pct-display' + (stage === 'done' ? ' done' : '');
+
+    if (sub !== undefined) statusSub.textContent = sub;
+    statusSub.classList.remove('error');
+  }
+
+  function setError(msg) {
+    stageLabel.innerHTML = 'Ошибка';
+    progressFill.style.width = '100%';
+    progressFill.style.background = '#ff4444';
+    pctDisplay.textContent = '✗';
+    pctDisplay.className = 'pct-display';
+    statusSub.textContent = msg;
+    statusSub.classList.add('error');
+  }
+
+  function reset() {
+    clearInterval(pollTimer);
+    startBtn.disabled = false;
+    progressFill.style.background = '';
+    statusSub.classList.remove('error');
+    downloadBtn.classList.remove('visible');
+  }
+
+  startBtn.addEventListener('click', async () => {
+    const url = urlInput.value.trim();
+    if (!url) { urlInput.focus(); return; }
+
+    reset();
+    startBtn.disabled = true;
+    statusBox.classList.add('visible');
+    setStage('pending', 0, '');
+
+    let jobId;
+    try {
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, format: selectedFmt, quality: selectedQuality }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      jobId = data.job_id;
+    } catch (err) {
+      setError(err.message);
+      startBtn.disabled = false;
+      return;
+    }
+
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/status/${jobId}`);
+        const job = await res.json();
+        const pct = typeof job.percent === 'number' ? job.percent : 0;
+
+        if (job.status === 'done') {
+          clearInterval(pollTimer);
+          setStage('done', 100, job.title);
+          const extLabel = { mp3: 'MP3', aac: 'AAC (.m4a)', opus: 'Opus' }[selectedFmt] || selectedFmt.toUpperCase();
+          downloadBtn.textContent = `⬇ Скачать ${extLabel}`;
+          downloadBtn.classList.add('visible');
+          downloadBtn.onclick = () => {
+            window.location.href = `/api/file/${jobId}`;
+            setTimeout(() => {
+              reset();
+              statusBox.classList.remove('visible');
+            }, 2000);
+          };
+          startBtn.disabled = false;
+
+        } else if (job.status === 'error') {
+          clearInterval(pollTimer);
+          setError(job.error || 'Неизвестная ошибка');
+          startBtn.disabled = false;
+
+        } else {
+          const stage = job.stage || 'pending';
+          setStage(stage, pct, '');
+        }
+      } catch {
+        clearInterval(pollTimer);
+        setError('Потеряно соединение с сервером');
+        startBtn.disabled = false;
+      }
+    }, 500);
+  });
+
+  urlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') startBtn.click();
+  });
+</script>
+</body>
+</html>
