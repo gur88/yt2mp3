@@ -13,10 +13,14 @@
 yt2mp3/
 ├── app.py              # Flask app: routes, download/convert job logic
 ├── static/
-│   └── index.html      # single-page UI
+│   ├── index.html      # single-page UI
+│   ├── privacy.html     # /privacy — legal, noindex
+│   └── terms.html       # /terms — legal, noindex
 ├── downloads/          # scratch dir for in-flight jobs; files deleted after serving
 └── README.md
 ```
+
+Each of `privacy.html`/`terms.html` is a standalone page with its own copy of the theme's CSS variables and base layout (no shared stylesheet) — consistent with `index.html` being self-contained. `app.py` routes `/privacy` and `/terms` to them via `send_static_file` (same pattern as `/`), so URLs stay extension-less even though Flask's static folder is served at the root. Both pages are marked `noindex` — they exist for legal/compliance completeness, not to compete for search terms.
 
 ## Key Dependencies
 

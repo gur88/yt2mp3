@@ -255,6 +255,16 @@ def index():
     return app.send_static_file("index.html")
 
 
+@app.route("/privacy")
+def privacy():
+    return app.send_static_file("privacy.html")
+
+
+@app.route("/terms")
+def terms():
+    return app.send_static_file("terms.html")
+
+
 @app.route("/api/info", methods=["POST"])
 def get_info():
     data = request.get_json(force=True)
