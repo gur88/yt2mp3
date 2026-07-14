@@ -16,6 +16,52 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 jobs: dict[str, dict] = {}
 
+# --- Rate limiting (in-memory, per client IP) ---
+RATE_LIMIT_WINDOW    = 3600  # seconds
+RATE_LIMIT_PER_HOUR  = 10
+MAX_CONCURRENT_PER_IP = 3
+
+rate_lock       = threading.Lock()
+request_times: dict[str, list[float]] = {}   # ip -> timestamps of started downloads in the window
+concurrent_counts: dict[str, int] = {}       # ip -> number of downloads currently running
+
+
+def get_client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def check_rate_limit(ip: str) -> str | None:
+    """Return a Russian error message if the IP is over a limit, else None. Reserves a slot on success."""
+    now = time.monotonic()
+    with rate_lock:
+        times = [t for t in request_times.get(ip, []) if now - t < RATE_LIMIT_WINDOW]
+
+        if concurrent_counts.get(ip, 0) >= MAX_CONCURRENT_PER_IP:
+            request_times[ip] = times
+            return (f"Слишком много одновременных скачиваний ({MAX_CONCURRENT_PER_IP}). "
+                     f"Дождитесь завершения текущих загрузок.")
+
+        if len(times) >= RATE_LIMIT_PER_HOUR:
+            request_times[ip] = times
+            return (f"Превышен лимит {RATE_LIMIT_PER_HOUR} скачиваний в час с одного IP. "
+                     f"Попробуйте позже.")
+
+        times.append(now)
+        request_times[ip] = times
+        concurrent_counts[ip] = concurrent_counts.get(ip, 0) + 1
+        return None
+
+
+def release_concurrent_slot(ip: str) -> None:
+    with rate_lock:
+        if ip in concurrent_counts:
+            concurrent_counts[ip] -= 1
+            if concurrent_counts[ip] <= 0:
+                del concurrent_counts[ip]
+
 FORMATS = {
     "mp3":  {"ext": "mp3",  "mime": "audio/mpeg"},
     "aac":  {"ext": "m4a",  "mime": "audio/mp4"},
@@ -103,7 +149,7 @@ def run_ffmpeg_with_progress(job_id: str, input_path: Path, output_path: Path,
     return proc.returncode == 0
 
 
-def run_download(job_id: str, url: str, fmt: str, quality: int) -> None:
+def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None:
     output_template = str(OUTPUT_DIR / f"{job_id}_%(title)s.%(ext)s")
     downloaded_file: list[Path | None] = [None]
 
@@ -167,6 +213,8 @@ def run_download(job_id: str, url: str, fmt: str, quality: int) -> None:
     except Exception as e:
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"]  = str(e)
+    finally:
+        release_concurrent_slot(ip)
 
 
 @app.route("/")
@@ -186,6 +234,11 @@ def start_download():
     if fmt not in FORMATS:
         return jsonify({"error": "Unknown format"}), 400
 
+    ip = get_client_ip()
+    limit_error = check_rate_limit(ip)
+    if limit_error:
+        return jsonify({"error": limit_error}), 429
+
     job_id = uuid.uuid4().hex[:10]
     jobs[job_id] = {
         "status": "pending", "stage": "pending",
@@ -193,7 +246,7 @@ def start_download():
     }
 
     threading.Thread(
-        target=run_download, args=(job_id, url, fmt, quality), daemon=True
+        target=run_download, args=(job_id, url, fmt, quality, ip), daemon=True
     ).start()
 
     return jsonify({"job_id": job_id})

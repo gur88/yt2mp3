@@ -45,3 +45,14 @@ yt2mp3/
 ## Data Model
 
 None — no database. State is an in-memory `jobs: dict[str, dict]` in `app.py`, lost on process restart.
+
+## Rate Limiting
+
+Per-IP, in-memory, no external dependency (mirrors the `jobs` dict pattern — lost on restart, doesn't scale across multiple processes/workers):
+
+- Max **3 concurrent** downloads per IP (`concurrent_counts`)
+- Max **10 downloads per rolling hour** per IP (`request_times`, timestamps pruned on each check)
+- Client IP resolution checks `X-Forwarded-For` first (for when a reverse proxy sits in front in production), falls back to `request.remote_addr`
+- Both checks + the reservation happen atomically under one `threading.Lock` (`check_rate_limit`) to avoid a race between checking and incrementing
+- Concurrent slot is released in `run_download`'s `finally` block (`release_concurrent_slot`), so it's freed on both success and failure
+- Exceeding either limit returns HTTP 429 with a Russian-language error message, surfaced as-is by the frontend's existing error handling
