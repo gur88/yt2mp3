@@ -22,6 +22,7 @@ Avoids downloading full video files when only the audio track is needed.
 - Embedded cover art: the video's thumbnail is muxed into the output file as attached-picture cover art (mp3/aac only — Opus's muxer doesn't support it, falls back to no cover), so it shows up in players like Яндекс Музыка (Important)
 - Downloaded file is served once and then deleted from the server (Critical — no persistent storage of user files)
 - Per-IP rate limiting: max 3 concurrent downloads, max 10/hour (Critical for public deployment)
+- SEO landing content: intro copy + FAQ accordion (7 Q&As) below the main tool, with FAQPage JSON-LD structured data for rich snippets (Important — organic search is the main acquisition channel for audiograb.ru)
 
 ## Scope Boundaries
 

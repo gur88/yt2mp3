@@ -55,6 +55,16 @@ During conversion, `run_download` fetches `info["thumbnail"]` (already available
 - `run_ffmpeg_with_progress` always tries with the cover first, and on ffmpeg failure retries once without it (`_build_ffmpeg_cmd`), logging a warning — this is what makes the opus case degrade to a plain audio file instead of breaking the conversion
 - **Gotcha already hit once:** the opus copy-path codec args used to hardcode `-vn` (added originally to strip the source webm's own video/thumbnail track when not embedding a cover). That flag silently discarded the mapped cover stream too, so the "failure" path never triggered and covers just silently vanished with no error or log. Fixed by only adding `-vn` when there's no `thumbnail_path` to map — when a cover *is* being embedded, the explicit `-map` calls already say exactly which streams go in, so `-vn` isn't needed and must not be added.
 
+## SEO Content & FAQ Accordion
+
+Below the tool card, `static/index.html` has a static SEO content section (intro copy + 7-question FAQ) with matching `FAQPage` JSON-LD for search rich snippets. Targets audiograb.ru's core search terms (download audio from YouTube, YouTube to MP3/AAC, extract sound from video).
+
+FAQ items are native `<details>`/`<summary>`, but with custom JS instead of default browser behavior, for two reasons: only one item open at a time, and an animated open/close instead of the instant native toggle.
+
+- Summary clicks are intercepted (`preventDefault`) and `item.open` is set manually by `openFaqItem`/`closeFaqItem`, so the visual state and the semantic `open` attribute can be sequenced deliberately (e.g. the details element isn't marked closed until the collapse animation actually finishes)
+- The browser's default UA rule hides a closed `<details>`'s content via `display:none`, which can't be animated — `.faq-content` overrides this to `display:block` unconditionally and uses `height` + `overflow:hidden` instead, so it's always in the layout and animatable
+- Height animation is triggered by setting the start height, forcing a synchronous reflow (reading `.offsetHeight`), then setting the end height — not `requestAnimationFrame`. rAF depends on the tab actually compositing frames, which doesn't happen in some automated/headless/backgrounded contexts (hit this while testing in the browser-preview tool here); the forced-reflow technique doesn't have that dependency and works the same in every real browser tab
+
 ## Data Model
 
 None — no database. State is an in-memory `jobs: dict[str, dict]` in `app.py`, lost on process restart.
