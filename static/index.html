@@ -295,6 +295,13 @@
   let selectedFmt     = 'aac';
   let selectedQuality = 192;
   let pollTimer       = null;
+  let pollStopped     = true;
+
+  function stopPolling() {
+    pollStopped = true;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
 
   const fmtNotes = {
     mp3:  { text: 'Конвертация из opus/aac → небольшая потеря качества', cls: '' },
@@ -356,7 +363,7 @@
   }
 
   function reset() {
-    clearInterval(pollTimer);
+    stopPolling();
     startBtn.disabled = false;
     progressFill.style.background = '';
     statusSub.classList.remove('error');
@@ -388,40 +395,48 @@
       return;
     }
 
+    pollStopped = false;
     pollTimer = setInterval(async () => {
+      if (pollStopped) return;
+      let res, job;
       try {
-        const res = await fetch(`/api/status/${jobId}`);
-        const job = await res.json();
-        const pct = typeof job.percent === 'number' ? job.percent : 0;
-
-        if (job.status === 'done') {
-          clearInterval(pollTimer);
-          setStage('done', 100, job.title);
-          const extLabel = { mp3: 'MP3', aac: 'AAC (.m4a)', opus: 'Opus' }[selectedFmt] || selectedFmt.toUpperCase();
-          downloadBtn.textContent = `⬇ Скачать ${extLabel}`;
-          downloadBtn.classList.add('visible');
-          downloadBtn.onclick = () => {
-            window.location.href = `/api/file/${jobId}`;
-            setTimeout(() => {
-              reset();
-              statusBox.classList.remove('visible');
-            }, 2000);
-          };
-          startBtn.disabled = false;
-
-        } else if (job.status === 'error') {
-          clearInterval(pollTimer);
-          setError(job.error || 'Неизвестная ошибка');
-          startBtn.disabled = false;
-
-        } else {
-          const stage = job.stage || 'pending';
-          setStage(stage, pct, '');
-        }
+        res = await fetch(`/api/status/${jobId}`);
+        job = await res.json();
       } catch {
-        clearInterval(pollTimer);
+        if (pollStopped) return;
+        stopPolling();
         setError('Потеряно соединение с сервером');
         startBtn.disabled = false;
+        return;
+      }
+
+      if (pollStopped) return;
+      const pct = typeof job.percent === 'number' ? job.percent : 0;
+
+      if (job.status === 'done') {
+        stopPolling();
+        setStage('done', 100, job.title);
+        const extLabel = { mp3: 'MP3', aac: 'AAC (.m4a)', opus: 'Opus' }[selectedFmt] || selectedFmt.toUpperCase();
+        downloadBtn.textContent = `⬇ Скачать ${extLabel}`;
+        downloadBtn.classList.add('visible');
+        downloadBtn.onclick = () => {
+          stopPolling();
+          window.location.href = `/api/file/${jobId}`;
+          setTimeout(() => {
+            reset();
+            statusBox.classList.remove('visible');
+          }, 2000);
+        };
+        startBtn.disabled = false;
+
+      } else if (job.status === 'error') {
+        stopPolling();
+        setError(job.error || 'Неизвестная ошибка');
+        startBtn.disabled = false;
+
+      } else {
+        const stage = job.stage || 'pending';
+        setStage(stage, pct, '');
       }
     }, 500);
   });
