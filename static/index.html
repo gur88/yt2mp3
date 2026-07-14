@@ -39,9 +39,9 @@
       color: var(--text);
       font-family: 'Segoe UI', system-ui, sans-serif;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 24px;
+      padding: 40px 24px;
     }
 
     .card {
@@ -53,8 +53,86 @@
       padding: 40px;
     }
 
+    .seo-content {
+      width: 100%;
+      max-width: 560px;
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .seo-content h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 14px;
+      letter-spacing: -0.3px;
+    }
+
+    .seo-content h2 {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 32px 0 14px;
+      letter-spacing: -0.2px;
+    }
+
+    .seo-content p { margin-bottom: 12px; }
+    .seo-content p:last-child { margin-bottom: 0; }
+
+    .faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    .faq-item summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+
+    .faq-item summary::after {
+      content: '+';
+      font-size: 18px;
+      font-weight: 400;
+      color: var(--accent);
+      flex-shrink: 0;
+      will-change: transform;
+      transition: transform .2s;
+    }
+    .faq-item[open] summary::after { transform: rotate(45deg); }
+
+    .faq-item summary { transition: color .15s; }
+    .faq-item summary:hover { color: var(--accent); }
+
+    .faq-item .faq-content {
+      display: block;
+      height: 0;
+      overflow: hidden;
+      transition: height .25s ease;
+    }
+
+    .faq-item .faq-answer {
+      padding: 0 18px 16px;
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
     @media (max-width: 480px) {
-      body { padding: 12px; }
+      body { padding: 20px 12px; }
       .card { padding: 20px; }
     }
 
@@ -342,6 +420,145 @@
   </div>
 </div>
 
+<section class="seo-content">
+  <h1>Скачать аудио с YouTube в MP3 и AAC</h1>
+  <p>
+    AudioGrab — сервис, который позволяет скачать аудио с YouTube без видео: вы вставляете ссылку
+    на ролик, а сервис извлекает звук напрямую из видеопотока и сохраняет его в отдельный файл.
+    Видео при этом никогда не загружается — скачивается только звуковая дорожка, поэтому файл
+    получается лёгким, а сам процесс — быстрым.
+  </p>
+  <p>
+    Сервис умеет конвертировать YouTube в MP3 (универсальный формат для любого плеера),
+    в AAC — формат, который сам YouTube использует внутри, поэтому конвертация проходит без
+    потери качества и хорошо подходит для загрузки в Яндекс Музыку — а также в Opus, если
+    важнее всего размер файла при сохранении качества. Обложка видео автоматически встраивается
+    в файл, чтобы трек красиво отображался в плеере.
+  </p>
+
+  <h2>Частые вопросы</h2>
+
+  <details class="faq-item">
+    <summary>Как скачать музыку с YouTube?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Вставьте ссылку на видео YouTube в поле выше, выберите формат — MP3, AAC или Opus — и
+      нажмите «Скачать аудио». Сервис извлечёт звуковую дорожку и предложит скачать готовый файл.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Какой формат выбрать для Яндекс Музыки?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Лучше всего подходит AAC (.m4a) — именно в этом формате YouTube хранит аудиодорожку большинства
+      роликов, поэтому файл конвертируется без потери качества и сохраняет обложку трека.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Скачивается ли видео?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Нет. Видеопоток никогда не загружается — сервис извлекает и сохраняет только звук из видео.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Бесплатно ли это?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Да, сервис бесплатный и не требует регистрации или установки программ — всё работает прямо
+      в браузере.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Какое максимальное качество?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Для MP3 доступен битрейт до 320 kbps. Для AAC и Opus сервис по возможности отдаёт исходный
+      аудиопоток YouTube без перекодирования — это максимальное качество, доступное для конкретного видео.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Нужно ли устанавливать программы или расширения?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Нет, ничего устанавливать не нужно — извлечение звука из видео происходит на сервере,
+      а вам остаётся только скачать готовый файл.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>С каких сайтов, кроме YouTube, можно скачивать?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Помимо YouTube и YouTube Music сервис поддерживает большинство сайтов, с которых умеет
+      извлекать аудио библиотека yt-dlp.
+    </p></div>
+  </details>
+</section>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Как скачать музыку с YouTube?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Вставьте ссылку на видео YouTube в поле выше, выберите формат — MP3, AAC или Opus — и нажмите «Скачать аудио». Сервис извлечёт звуковую дорожку и предложит скачать готовый файл."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Какой формат выбрать для Яндекс Музыки?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Лучше всего подходит AAC (.m4a) — именно в этом формате YouTube хранит аудиодорожку большинства роликов, поэтому файл конвертируется без потери качества и сохраняет обложку трека."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Скачивается ли видео?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Нет. Видеопоток никогда не загружается — сервис извлекает и сохраняет только звук из видео."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Бесплатно ли это?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Да, сервис бесплатный и не требует регистрации или установки программ — всё работает прямо в браузере."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Какое максимальное качество?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Для MP3 доступен битрейт до 320 kbps. Для AAC и Opus сервис по возможности отдаёт исходный аудиопоток YouTube без перекодирования — это максимальное качество, доступное для конкретного видео."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Нужно ли устанавливать программы или расширения?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Нет, ничего устанавливать не нужно — извлечение звука из видео происходит на сервере, а вам остаётся только скачать готовый файл."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "С каких сайтов, кроме YouTube, можно скачивать?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Помимо YouTube и YouTube Music сервис поддерживает большинство сайтов, с которых умеет извлекать аудио библиотека yt-dlp."
+      }
+    }
+  ]
+}
+</script>
+
 <script>
   const urlInput     = document.getElementById('urlInput');
   const startBtn     = document.getElementById('startBtn');
@@ -546,6 +763,47 @@
 
   urlInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') startBtn.click();
+  });
+
+  function openFaqItem(item, content) {
+    item.open = true;
+    const target = content.scrollHeight;
+    content.style.height = '0px';
+    content.offsetHeight; // force reflow so the 0px state is committed before animating
+    content.style.height = target + 'px';
+    content.addEventListener('transitionend', function onEnd() {
+      content.style.height = 'auto';
+      content.removeEventListener('transitionend', onEnd);
+    }, { once: true });
+  }
+
+  function closeFaqItem(item, content) {
+    content.style.height = content.scrollHeight + 'px';
+    content.offsetHeight; // force reflow so the current height is committed before animating
+    content.style.height = '0px';
+    content.addEventListener('transitionend', function onEnd() {
+      item.open = false;
+      content.removeEventListener('transitionend', onEnd);
+    }, { once: true });
+  }
+
+  document.querySelectorAll('.faq-item').forEach(item => {
+    const summary = item.querySelector('summary');
+    const content = item.querySelector('.faq-content');
+
+    summary.addEventListener('click', e => {
+      e.preventDefault();
+      if (item.open) {
+        closeFaqItem(item, content);
+        return;
+      }
+      document.querySelectorAll('.faq-item').forEach(other => {
+        if (other !== item && other.open) {
+          closeFaqItem(other, other.querySelector('.faq-content'));
+        }
+      });
+      openFaqItem(item, content);
+    });
   });
 </script>
 </body>
