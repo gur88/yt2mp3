@@ -1,6 +1,7 @@
 import re
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from flask import Flask, jsonify, request, send_file, after_this_request
 import yt_dlp
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+logger = app.logger
 
 OUTPUT_DIR = Path("downloads")
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -28,6 +30,22 @@ FMT_SELECTORS = {
 
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+
+def _cleanup_file(filepath: Path, attempts: int = 5, delay: float = 0.5) -> None:
+    """
+    Delete filepath, retrying briefly if the OS still holds a handle open
+    (observed on Windows dev server right after send_file finishes).
+    """
+    for attempt in range(attempts):
+        try:
+            filepath.unlink(missing_ok=True)
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                logger.warning("Could not delete %s after %d attempts", filepath, attempts)
+                return
+            time.sleep(delay)
 
 
 def ffmpeg_codec_args(fmt: str, input_path: Path, quality: int) -> list[str]:
@@ -205,11 +223,8 @@ def download_file(job_id: str):
 
     @after_this_request
     def remove_file(response):
-        try:
-            filepath.unlink(missing_ok=True)
-            del jobs[job_id]
-        except Exception:
-            pass
+        jobs.pop(job_id, None)
+        threading.Thread(target=_cleanup_file, args=(filepath,), daemon=True).start()
         return response
 
     return send_file(filepath, as_attachment=True,
