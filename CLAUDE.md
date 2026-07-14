@@ -1,0 +1,27 @@
+## Project Knowledge
+
+Project documentation lives in `.claude/skills/project-knowledge/references/` (project.md, architecture.md, patterns.md, deployment.md) — read it before making changes.
+
+## Language
+- Artifacts addressed to the user (chat, plans, plan-mode, interviews, validator summaries, user-spec, README): the language the user writes in. Declare your language here — e.g. "This user writes in English." Skills and agents read the user's language from this line.
+- Technical docs, code, code comments, AI prompts, internal logs (tech-spec, tasks, CLAUDE.md, skills): English.
+
+## Behavior
+
+- No "Great question!", no filler, no water.
+- NEVER use AskUserQuestion tool. Ask questions as plain text in chat instead.
+- ALL deployments via GitHub CI/CD only. Direct server access (SSH, container restarts) only for emergency debugging of broken production.
+
+## Task Planning
+- Use TodoWrite for multi-step tasks (>1 step)
+- When user asks for team/swarm of agents: use TeamCreate, not TaskCreate
+
+## Security
+
+- NEVER ask user to write secrets in chat
+- Instead: provide instructions where to store them securely
+  - Local: `.env` files, config files
+  - CI/CD: GitHub Actions secrets
+- ALWAYS ask before Deploy/push to main/production
+- ALWAYS add secrets to `.gitignore`: `.env`, `*.key`, `credentials.json`, `secrets/`
+- Be cautious with external actions (push, deploy, send messages, create PRs). Ask before acting externally when uncertain.
