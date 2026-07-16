@@ -162,6 +162,50 @@
     .logo-text { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
     .logo-text span { color: var(--accent); }
 
+    .cookie-banner {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 1000;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 12px 24px;
+      padding: 16px 24px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      transform: translateY(100%);
+      transition: transform .3s ease;
+    }
+    .cookie-banner.visible { transform: translateY(0); }
+    .cookie-banner p {
+      margin: 0;
+      max-width: 640px;
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .cookie-banner button {
+      flex-shrink: 0;
+      padding: 10px 22px;
+      border: none;
+      border-radius: calc(var(--radius) / 2);
+      background: var(--accent);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .cookie-banner button:hover { background: var(--accent2); }
+
+    @media (max-width: 480px) {
+      .cookie-banner { flex-direction: column; align-items: stretch; text-align: center; padding: 16px; }
+      .cookie-banner button { width: 100%; }
+    }
+
     label {
       display: block;
       font-size: 12px;
@@ -524,6 +568,14 @@
   <a href="/terms">Пользовательское соглашение</a>
 </footer>
 
+<div class="cookie-banner" id="cookieBanner">
+  <p>
+    Сайт использует технические (сессионные) cookies для работы сервиса (ограничение частоты запросов).
+    Без рекламы и трекинга.
+  </p>
+  <button id="cookieAcceptBtn" type="button">Принять</button>
+</div>
+
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -837,6 +889,18 @@
   });
 
   document.getElementById('copyYear').textContent = '© ' + new Date().getFullYear() + ' AudioGrab.ru';
+
+  const cookieBanner = document.getElementById('cookieBanner');
+  const cookieAcceptBtn = document.getElementById('cookieAcceptBtn');
+
+  if (!localStorage.getItem('cookie_consent')) {
+    cookieBanner.classList.add('visible');
+  }
+
+  cookieAcceptBtn.addEventListener('click', () => {
+    localStorage.setItem('cookie_consent', '1');
+    cookieBanner.classList.remove('visible');
+  });
 </script>
 </body>
 </html>
