@@ -69,6 +69,10 @@ FAQ items are native `<details>`/`<summary>`, but with custom JS instead of defa
 - The browser's default UA rule hides a closed `<details>`'s content via `display:none`, which can't be animated — `.faq-content` overrides this to `display:block` unconditionally and uses `height` + `overflow:hidden` instead, so it's always in the layout and animatable
 - Height animation is triggered by setting the start height, forcing a synchronous reflow (reading `.offsetHeight`), then setting the end height — not `requestAnimationFrame`. rAF depends on the tab actually compositing frames, which doesn't happen in some automated/headless/backgrounded contexts (hit this while testing in the browser-preview tool here); the forced-reflow technique doesn't have that dependency and works the same in every real browser tab
 
+## Cookie Consent Banner
+
+`static/index.html` shows a fixed bottom banner (non-blocking, just a notice — no accept/reject choice since the only cookie is the technical session cookie for rate limiting, not tracking) on first visit, styled with the same `:root` CSS variables as the rest of the page. Dismissal is recorded in `localStorage` (`cookie_consent` key) so it doesn't reappear.
+
 ## Data Model
 
 None — no database. State is an in-memory `jobs: dict[str, dict]` in `app.py`, lost on process restart.

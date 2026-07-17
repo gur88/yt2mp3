@@ -14,3 +14,5 @@ No automated tests yet.
 ## Business Rules
 
 None beyond what's in `architecture.md` (format/codec selection table).
+
+`static/privacy.html` states the exact IP retention period (rate-limit window) in prose. If `RATE_LIMIT_WINDOW` in `app.py` ever changes, update that wording too — it's a duplicated fact, not derived at build time.
