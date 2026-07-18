@@ -276,7 +276,8 @@ def get_info():
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
-    except Exception:
+    except Exception as e:
+        logger.exception(e)
         return jsonify({"error": "Не удалось получить информацию о видео. Проверьте ссылку."}), 400
 
     return jsonify({
