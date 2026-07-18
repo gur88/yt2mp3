@@ -440,7 +440,7 @@
     <div class="logo-text">YT <span>→</span> Audio</div>
   </div>
 
-  <label>Ссылка на YouTube</label>
+  <label>Ссылка на видео или трек</label>
   <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." />
 
   <div class="preview-box" id="previewBox">
@@ -457,7 +457,7 @@
     <button class="fmt-btn active" data-fmt="aac">AAC (.m4a)<span class="fmt-sub">Яндекс Музыка ★</span></button>
     <button class="fmt-btn" data-fmt="opus">Opus (.opus)<span class="fmt-sub">лучшее сжатие</span></button>
   </div>
-  <div class="fmt-note good" id="fmtNote">✓ Без перекодирования — оригинальное качество YouTube</div>
+  <div class="fmt-note good" id="fmtNote">✓ Без перекодирования — оригинальное качество источника</div>
 
   <div class="quality-section" id="qualitySection" style="display:none">
     <label>Качество (kbps)</label>
@@ -487,7 +487,7 @@
   <div class="divider"></div>
   <div class="hint">
     Видеофайл не скачивается — только аудиопоток.<br/>
-    Работает с YouTube, YouTube Music и большинством других сайтов.
+    Работает с YouTube, TikTok, SoundCloud и многими другими сайтами.
   </div>
 </div>
 
@@ -750,7 +750,7 @@
 
   const fmtNotes = {
     mp3:  { text: 'Конвертация из opus/aac → небольшая потеря качества', cls: '' },
-    aac:  { text: '✓ Без перекодирования — оригинальное качество YouTube', cls: 'good' },
+    aac:  { text: '✓ Без перекодирования — оригинальное качество источника', cls: 'good' },
     opus: { text: '✓ Без перекодирования — наилучшее сжатие при том же качестве', cls: 'good' },
   };
 
