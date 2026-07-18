@@ -10,7 +10,14 @@ Project documentation lives in `.claude/skills/project-knowledge/references/` (p
 
 - No "Great question!", no filler, no water.
 - NEVER use AskUserQuestion tool. Ask questions as plain text in chat instead.
-- ALL deployments via GitHub CI/CD only. Direct server access (SSH, container restarts) only for emergency debugging of broken production.
+- ALL deployments of the yt2mp3 app itself via GitHub CI/CD only.
+
+### Direct Server Access Exceptions
+
+- Emergency debugging of broken production (existing rule)
+- One-off infrastructure provisioning (installing new system-level
+  packages/services like Docker, unrelated to the yt2mp3 app itself) —
+  still requires explicit user confirmation per action
 
 ## Task Planning
 - Use TodoWrite for multi-step tasks (>1 step)
