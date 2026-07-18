@@ -266,6 +266,11 @@ def privacy():
     return app.send_static_file("privacy.html")
 
 
+@app.errorhandler(404)
+def not_found(e):
+    return app.send_static_file("404.html"), 404
+
+
 @app.route("/terms")
 def terms():
     return app.send_static_file("terms.html")
