@@ -191,11 +191,17 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
         "progress_hooks": [progress_hook],
         "quiet":          True,
         "no_warnings":    True,
+        "noplaylist":     True,
         # No yt-dlp postprocessors — we run ffmpeg manually for full progress
     }
 
     thumb_path: Path | None = None
     try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+            flat_info = ydl.extract_info(url, download=False)
+        if flat_info.get("_type") == "playlist":
+            raise ValueError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info     = ydl.extract_info(url, download=True)
             title    = sanitize_filename(info.get("title", job_id))
@@ -274,7 +280,12 @@ def get_info():
         return jsonify({"error": "URL is required"}), 400
 
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+            flat_info = ydl.extract_info(url, download=False)
+        if flat_info.get("_type") == "playlist":
+            return jsonify({"error": "Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео"}), 400
+
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
         logger.exception(e)
