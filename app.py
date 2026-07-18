@@ -26,6 +26,11 @@ rate_lock       = threading.Lock()
 request_times: dict[str, list[float]] = {}   # ip -> timestamps of started downloads in the window
 concurrent_counts: dict[str, int] = {}       # ip -> number of downloads currently running
 
+# --- /api/info result cache (in-memory) ---
+INFO_CACHE_TTL  = 600  # seconds
+info_cache_lock = threading.Lock()
+info_cache: dict[str, dict] = {}   # url -> {"data": {...}, "ts": float}
+
 
 def get_client_ip() -> str:
     forwarded = request.headers.get("X-Forwarded-For", "")
@@ -34,8 +39,12 @@ def get_client_ip() -> str:
     return request.remote_addr or "unknown"
 
 
-def check_rate_limit(ip: str) -> str | None:
-    """Return a Russian error message if the IP is over a limit, else None. Reserves a slot on success."""
+def check_rate_limit(ip: str) -> tuple[str, int | None] | None:
+    """
+    Return (Russian error message, retry_after_seconds) if the IP is over a limit, else None.
+    retry_after_seconds is None for the concurrent-downloads limit — that slot frees up
+    whenever a running download finishes, not on a fixed schedule. Reserves a slot on success.
+    """
     now = time.monotonic()
     with rate_lock:
         times = [t for t in request_times.get(ip, []) if now - t < RATE_LIMIT_WINDOW]
@@ -43,12 +52,13 @@ def check_rate_limit(ip: str) -> str | None:
         if concurrent_counts.get(ip, 0) >= MAX_CONCURRENT_PER_IP:
             request_times[ip] = times
             return (f"Слишком много одновременных скачиваний ({MAX_CONCURRENT_PER_IP}). "
-                     f"Дождитесь завершения текущих загрузок.")
+                     f"Дождитесь завершения текущих загрузок.", None)
 
         if len(times) >= RATE_LIMIT_PER_HOUR:
             request_times[ip] = times
+            retry_after = int(RATE_LIMIT_WINDOW - (now - min(times)))
             return (f"Превышен лимит {RATE_LIMIT_PER_HOUR} скачиваний в час с одного IP. "
-                     f"Попробуйте позже.")
+                     f"Попробуйте позже.", retry_after)
 
         times.append(now)
         request_times[ip] = times
@@ -284,6 +294,11 @@ def get_info():
     if not url:
         return jsonify({"error": "URL is required"}), 400
 
+    with info_cache_lock:
+        cached = info_cache.get(url)
+        if cached and time.monotonic() - cached["ts"] < INFO_CACHE_TTL:
+            return jsonify(cached["data"])
+
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
@@ -296,12 +311,16 @@ def get_info():
         logger.exception(e)
         return jsonify({"error": "Не удалось получить информацию о видео. Проверьте ссылку."}), 400
 
-    return jsonify({
+    result = {
         "title":     info.get("title"),
         "artist":    info.get("artist") or info.get("uploader") or info.get("channel"),
         "thumbnail": info.get("thumbnail"),
         "duration":  info.get("duration"),
-    })
+    }
+    with info_cache_lock:
+        info_cache[url] = {"data": result, "ts": time.monotonic()}
+
+    return jsonify(result)
 
 
 @app.route("/api/download", methods=["POST"])
@@ -317,9 +336,13 @@ def start_download():
         return jsonify({"error": "Unknown format"}), 400
 
     ip = get_client_ip()
-    limit_error = check_rate_limit(ip)
-    if limit_error:
-        return jsonify({"error": limit_error}), 429
+    limit_result = check_rate_limit(ip)
+    if limit_result:
+        limit_error, retry_after_seconds = limit_result
+        payload = {"error": limit_error}
+        if retry_after_seconds is not None:
+            payload["retry_after_seconds"] = retry_after_seconds
+        return jsonify(payload), 429
 
     job_id = uuid.uuid4().hex[:10]
     jobs[job_id] = {

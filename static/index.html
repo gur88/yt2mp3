@@ -722,6 +722,7 @@
   let selectedQuality = 192;
   let pollTimer       = null;
   let pollStopped     = true;
+  let rateLimitTimer  = null;
   let previewTimer    = null;
   let previewRequestId = 0;
 
@@ -823,8 +824,34 @@
     statusSub.classList.add('error');
   }
 
+  function clearRateLimitTimer() {
+    if (rateLimitTimer) { clearInterval(rateLimitTimer); rateLimitTimer = null; }
+  }
+
+  function formatCountdown(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function startRateLimitCountdown(seconds) {
+    let remaining = Math.max(0, Math.round(seconds));
+    clearRateLimitTimer();
+    setError(`Попробуйте через ${formatCountdown(remaining)}`);
+    rateLimitTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearRateLimitTimer();
+        setError('Лимит должен был сброситься — попробуйте снова');
+        return;
+      }
+      statusSub.textContent = `Попробуйте через ${formatCountdown(remaining)}`;
+    }, 1000);
+  }
+
   function reset() {
     stopPolling();
+    clearRateLimitTimer();
     startBtn.disabled = false;
     progressFill.style.background = '';
     statusSub.classList.remove('error');
@@ -848,7 +875,14 @@
         body: JSON.stringify({ url, format: selectedFmt, quality: selectedQuality }),
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        if (res.status === 429 && data.retry_after_seconds) {
+          startRateLimitCountdown(data.retry_after_seconds);
+          startBtn.disabled = false;
+          return;
+        }
+        throw new Error(data.error);
+      }
       jobId = data.job_id;
     } catch (err) {
       setError(err.message);
