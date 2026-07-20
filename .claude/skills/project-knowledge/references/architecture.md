@@ -13,14 +13,35 @@
 yt2mp3/
 ├── app.py              # Flask app: routes, download/convert job logic
 ├── static/
-│   ├── index.html      # single-page UI
+│   ├── index.html      # main tool page (YouTube-focused)
+│   ├── tiktok.html      # /tiktok — same tool, TikTok-focused SEO content
+│   ├── soundcloud.html  # /soundcloud — same tool, SoundCloud-focused SEO content
+│   ├── vk.html           # /vk — same tool, VK Video-focused SEO content
+│   ├── app.css          # shared styling for the four tool pages above
+│   ├── app.js            # shared tool logic for the four tool pages above
 │   ├── privacy.html     # /privacy — legal, noindex
-│   └── terms.html       # /terms — legal, noindex
+│   ├── terms.html       # /terms — legal, noindex
+│   └── 404.html         # error page, noindex
 ├── downloads/          # scratch dir for in-flight jobs; files deleted after serving
 └── README.md
 ```
 
-Each of `privacy.html`/`terms.html` is a standalone page with its own copy of the theme's CSS variables and base layout (no shared stylesheet) — consistent with `index.html` being self-contained. `app.py` routes `/privacy` and `/terms` to them via `send_static_file` (same pattern as `/`), so URLs stay extension-less even though Flask's static folder is served at the root. Both pages are marked `noindex` — they exist for legal/compliance completeness, not to compete for search terms.
+Two distinct page patterns, deliberately different:
+
+- **Tool pages** (`index.html`, `tiktok.html`, `soundcloud.html`, `vk.html`) share `app.css`/`app.js` via `<link>`/`<script src>` — the tool card markup (ids, structure) is duplicated per page since there's no templating, but all styling and behavior lives in the two shared files. No build step, so a manual cache-busting version query (`app.css?v=1`, `app.js?v=1`) must be bumped by hand in every page that references them whenever either file changes — see `patterns.md`.
+- **Standalone pages** (`privacy.html`, `terms.html`, `404.html`) stay fully self-contained with their own inline `:root` CSS copy, no shared stylesheet — they're simple enough that sharing isn't worth the coupling, and unlike the tool pages they don't need the interactive JS at all.
+
+Flask routes to all of these via `send_static_file` (same pattern for `/`, `/tiktok`, `/soundcloud`, `/vk`, `/privacy`, `/terms`), so URLs stay extension-less even though Flask's static folder is served at the root.
+
+## Landing Pages (`/tiktok`, `/soundcloud`, `/vk`)
+
+Same fully-functional tool card as `/`, wrapped in source-specific SEO content: unique `<title>`/description/canonical/OG/Twitter tags, unique H1 + intro copy, and a unique `FAQPage` JSON-LD matching the visible FAQ 1-for-1 (verified by comparing `<summary>` count to JSON entity count — must stay equal whenever a page's FAQ changes). `SoftwareApplication` JSON-LD stays on the main page only — one canonical entity per site, not per landing page.
+
+Each page's input placeholder is source-specific (e.g. `https://vkvideo.ru/video-...` on `/vk`); format defaults are unchanged (AAC preselected) since `app.js` doesn't vary behavior per page.
+
+Cross-linking: a `.source-links` nav block on every tool page links to the other three, always omitting a link to itself (main page links to the 3 landing pages; each landing page links to the main page and its two siblings).
+
+SEO copy makes only claims verified against actual `yt-dlp`/`ffmpeg` behavior — e.g. the SoundCloud page doesn't claim Opus ever avoids re-encoding (tested: SoundCloud never serves a native webm/opus stream to yt-dlp, so `opus` requests always re-encode) and only says AAC *may* copy without re-encoding, since that depends on whether the specific track happens to have an HLS-AAC source (confirmed both ways: one test track only had MP3, another had `hls_aac_160k` which the AAC format request does stream-copy — verified via `ffprobe` bitrate matching the source's 160k exactly, since a re-encode would show the code's fixed 192k target instead).
 
 ## Key Dependencies
 

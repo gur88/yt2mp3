@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Скачать трек с SoundCloud в MP3 — AudioGrab</title>
+  <meta name="description" content="Скачать музыку с SoundCloud: вставьте ссылку на трек — сервис извлечёт аудио в MP3, AAC или Opus. Если исходный поток уже в AAC, перекодирования не будет. Бесплатно, без установки программ." />
+  <link rel="canonical" href="https://audiograb.ru/soundcloud" />
+
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
+  <link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://audiograb.ru/soundcloud" />
+  <meta property="og:title" content="Скачать трек с SoundCloud в MP3 — AudioGrab" />
+  <meta property="og:description" content="Скачать музыку с SoundCloud: вставьте ссылку на трек — сервис извлечёт аудио в MP3, AAC или Opus. Если исходный поток уже в AAC, перекодирования не будет. Бесплатно, без установки программ." />
+  <meta property="og:image" content="https://audiograb.ru/og-image.png" />
+  <meta property="og:locale" content="ru_RU" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Скачать трек с SoundCloud в MP3 — AudioGrab" />
+  <meta name="twitter:description" content="Скачать музыку с SoundCloud: вставьте ссылку на трек — сервис извлечёт аудио в MP3, AAC или Opus. Если исходный поток уже в AAC, перекодирования не будет. Бесплатно, без установки программ." />
+  <meta name="twitter:image" content="https://audiograb.ru/og-image.png" />
+  <link rel="stylesheet" href="/app.css?v=1" />
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
+      <rect width="38" height="38" rx="10" fill="#1f0808"/>
+      <path d="M10 19C10 14 14.5 10 19 10C23.5 10 28 14 28 19C28 24 23.5 28 19 28C14.5 28 10 24 10 19Z" stroke="#ff3b3b" stroke-width="1.5"/>
+      <path d="M16.5 15.5L16.5 22.5L23.5 19L16.5 15.5Z" fill="#ff3b3b"/>
+      <path d="M7 30L31 30" stroke="#ff6b35" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="13" cy="33" r="2" fill="#ff6b35"/>
+      <circle cx="25" cy="33" r="2" fill="#ff6b35"/>
+      <rect x="11" y="30" width="4" height="3" fill="#1a1a1a"/>
+      <rect x="23" y="30" width="4" height="3" fill="#1a1a1a"/>
+    </svg>
+    <div class="logo-text">YT <span>→</span> Audio</div>
+  </div>
+
+  <label>Ссылка на видео или трек</label>
+  <input type="text" id="urlInput" placeholder="https://soundcloud.com/artist/track-name" />
+
+  <div class="preview-box" id="previewBox">
+    <img class="preview-thumb" id="previewThumb" alt="" />
+    <div class="preview-meta">
+      <div class="preview-title" id="previewTitle"></div>
+      <div class="preview-artist" id="previewArtist"></div>
+    </div>
+  </div>
+
+  <label>Формат</label>
+  <div class="format-row" id="formatRow">
+    <button class="fmt-btn" data-fmt="mp3">MP3<span class="fmt-sub">универсальный</span></button>
+    <button class="fmt-btn active" data-fmt="aac">AAC (.m4a)<span class="fmt-sub">Яндекс Музыка ★</span></button>
+    <button class="fmt-btn" data-fmt="opus">Opus (.opus)<span class="fmt-sub">лучшее сжатие</span></button>
+  </div>
+  <div class="fmt-note good" id="fmtNote">✓ Без перекодирования — оригинальное качество источника</div>
+
+  <div class="quality-section" id="qualitySection" style="display:none">
+    <label>Качество (kbps)</label>
+    <div class="quality-row" id="qualityRow">
+      <button class="q-btn" data-q="128">128</button>
+      <button class="q-btn active" data-q="192">192</button>
+      <button class="q-btn" data-q="256">256</button>
+      <button class="q-btn" data-q="320">320</button>
+    </div>
+  </div>
+
+  <button class="btn" id="startBtn">Скачать аудио</button>
+
+  <!-- Status block -->
+  <div class="status-box" id="statusBox">
+    <div class="stage-row">
+      <div class="stage-label" id="stageLabel"><span class="dot"></span>Подготовка</div>
+      <div class="pct-display" id="pctDisplay">0.00%</div>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="status-sub" id="statusSub"></div>
+    <button class="download-btn" id="downloadBtn">⬇ Скачать файл</button>
+  </div>
+
+  <div class="divider"></div>
+  <div class="hint">
+    Видеофайл не скачивается — только аудиопоток.<br/>
+    Работает с YouTube, TikTok, SoundCloud, VK Видео и многими другими сайтами.
+  </div>
+</div>
+
+<section class="seo-content">
+  <h1>Скачать трек с SoundCloud в MP3</h1>
+  <p>
+    AudioGrab скачивает треки и DJ-сеты с SoundCloud напрямую в аудиофайл — вставьте ссылку на
+    публичный трек, выберите формат, и сервис подготовит файл для скачивания.
+  </p>
+  <p>
+    Формат AAC иногда совпадает с тем, в котором SoundCloud уже хранит трек, — тогда сервис
+    копирует аудиопоток напрямую, без перекодирования и потери качества. Если нет, или выбраны
+    MP3/Opus — звук аккуратно конвертируется в выбранный формат.
+  </p>
+  <p>
+    Работает и с длинными записями — DJ-сетами и миксами продолжительностью в час и более,
+    ограничений по длительности нет.
+  </p>
+
+  <h2>Частые вопросы</h2>
+
+  <details class="faq-item">
+    <summary>Как скачать трек с SoundCloud?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Вставьте ссылку на трек SoundCloud в поле выше, выберите формат — MP3, AAC или Opus — и
+      нажмите «Скачать аудио».
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Работают ли приватные треки?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Нет, сервис может обработать только треки с открытым публичным доступом — приватные и
+      защищённые ссылки не поддерживаются.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Почему для некоторых треков нет потери качества?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Если исходный поток трека на SoundCloud уже в AAC, сервис копирует его напрямую без
+      перекодирования. Заранее не угадать — это зависит от того, в каком формате хранит
+      конкретный трек сама платформа.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Можно ли скачать DJ-сет или длинный микс?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Да, ограничений по длительности нет.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Скачиваются ли плейлисты или профили целиком?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Пока нет — сервис работает с отдельными треками, ссылку на плейлист или профиль нужно
+      заменить на ссылку конкретного трека.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Нужно ли устанавливать программы или расширения?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Нет, ничего устанавливать не нужно.
+    </p></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Бесплатно ли это?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Да, без регистрации и ограничений по количеству (в рамках лимита защиты от перегрузки).
+    </p></div>
+  </details>
+</section>
+
+<nav class="source-links">
+  Скачать из: <a href="/">YouTube</a> · <a href="/tiktok">TikTok</a> · <a href="/vk">VK Видео</a>
+</nav>
+
+<footer class="site-footer">
+  <span id="copyYear"></span>
+  <span class="sep">·</span>
+  <a href="/privacy">Политика конфиденциальности</a>
+  <span class="sep">·</span>
+  <a href="/terms">Пользовательское соглашение</a>
+</footer>
+
+<div class="cookie-banner" id="cookieBanner">
+  <p>
+    Сайт использует технические (сессионные) cookies для работы сервиса (ограничение частоты запросов).
+    Без рекламы и трекинга.
+  </p>
+  <button id="cookieAcceptBtn" type="button">Принять</button>
+</div>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Как скачать трек с SoundCloud?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Вставьте ссылку на трек SoundCloud в поле выше, выберите формат — MP3, AAC или Opus — и нажмите «Скачать аудио»."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Работают ли приватные треки?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Нет, сервис может обработать только треки с открытым публичным доступом — приватные и защищённые ссылки не поддерживаются."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Почему для некоторых треков нет потери качества?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Если исходный поток трека на SoundCloud уже в AAC, сервис копирует его напрямую без перекодирования. Заранее не угадать — это зависит от того, в каком формате хранит конкретный трек сама платформа."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Можно ли скачать DJ-сет или длинный микс?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Да, ограничений по длительности нет."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Скачиваются ли плейлисты или профили целиком?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Пока нет — сервис работает с отдельными треками, ссылку на плейлист или профиль нужно заменить на ссылку конкретного трека."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Нужно ли устанавливать программы или расширения?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Нет, ничего устанавливать не нужно."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Бесплатно ли это?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Да, без регистрации и ограничений по количеству (в рамках лимита защиты от перегрузки)."
+      }
+    }
+  ]
+}
+</script>
+
+<script src="/app.js?v=1"></script>
+<link rel="preconnect" href="https://analytics.audiograb.ru">
+<script defer src="https://analytics.audiograb.ru/script.js" data-website-id="19460776-616d-4b04-888d-509b1d7ebba3"></script>
+</body>
+</html>

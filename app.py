@@ -362,6 +362,21 @@ def privacy():
     return app.send_static_file("privacy.html")
 
 
+@app.route("/tiktok")
+def tiktok():
+    return app.send_static_file("tiktok.html")
+
+
+@app.route("/soundcloud")
+def soundcloud():
+    return app.send_static_file("soundcloud.html")
+
+
+@app.route("/vk")
+def vk():
+    return app.send_static_file("vk.html")
+
+
 @app.errorhandler(404)
 def not_found(e):
     return app.send_static_file("404.html"), 404
