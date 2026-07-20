@@ -13,7 +13,7 @@ Serves on `http://localhost:5000`. Requires `ffmpeg` installed and on PATH (both
 
 ## Environments
 
-- **Production**: VPS `213.139.208.8`, app at `/var/www/yt2mp3`, run as a `systemd` service named `yt2mp3`
+- **Production**: VPS `213.139.208.8`, app at `/var/www/yt2mp3`, run as a `systemd` service named `yt2mp3` via `gunicorn --workers 1 --bind 127.0.0.1:5000 app:app` (single worker is load-bearing: all in-memory state — `jobs`, `info_cache`, `request_times` — lives in one process with no cross-process sharing; adding workers would silently break rate limiting, the info cache, and job status polling)
 - **Local**: developer machine, no staging environment
 
 ## CI/CD

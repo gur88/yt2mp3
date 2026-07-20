@@ -50,6 +50,16 @@ Each of `privacy.html`/`terms.html` is a standalone page with its own copy of th
 
 `POST /api/info {url}` runs `yt_dlp.extract_info(url, download=False)` — metadata only, no file ever touches disk — and returns `{title, artist, thumbnail, duration}` (`artist` falls back through `artist → uploader → channel`, since not every video sets an explicit artist tag). The frontend calls this on a 600ms debounce after the URL input changes (`static/index.html`), guarding against out-of-order responses with a `previewRequestId` counter so a stale response for an old URL can't overwrite the preview for a newer one.
 
+Results are cached in-memory for 10 minutes (`info_cache`, keyed by the raw URL string — no normalization, so `youtu.be/X` and `youtube.com/watch?v=X` cache separately). Only successful lookups are cached; errors are never cached, so a transient extraction failure doesn't stick for the full TTL.
+
+## Playlist URLs Are Rejected
+
+Both `/api/info` and `run_download` reject playlist URLs instead of processing them. A bare `yt_dlp.extract_info` call on a playlist link (no `extract_flat`) resolves every video's full metadata synchronously — confirmed to hang past 60s on a 96-video playlist — and in `run_download` would silently download every video while only converting/serving one arbitrary file, leaking the rest to disk.
+
+The fix is two-layered: `noplaylist: True` in the yt-dlp options handles the mixed case (`watch?v=X&list=Y` — takes the single video), and a cheap upfront `extract_flat: True` probe checks `info.get("_type") == "playlist"` to reject bare playlist links (`playlist?list=Y`) in ~1-2s before the expensive full extraction ever runs. `noplaylist` alone does *not* cover the bare-playlist case — there's no video to fall back to, so yt-dlp has no choice but to resolve the whole thing.
+
+Same detection works for non-YouTube playlist URLs (verified against a VK Video playlist link) since the `_type` check is generic to whatever extractor yt-dlp picks.
+
 ## Cover Art Embedding
 
 During conversion, `run_download` fetches `info["thumbnail"]` (already available from the same `extract_info` call used for the download) via `urllib.request` into a temp file, then `run_ffmpeg_with_progress` muxes it in as attached-picture cover art: second `-i` input, `-map 0:a -map 1:v`, `-c:v mjpeg -disposition:v:0 attached_pic`.
@@ -83,7 +93,31 @@ Per-IP, in-memory, no external dependency (mirrors the `jobs` dict pattern — l
 
 - Max **3 concurrent** downloads per IP (`concurrent_counts`)
 - Max **10 downloads per rolling hour** per IP (`request_times`, timestamps pruned on each check)
-- Client IP resolution checks `X-Forwarded-For` first (for when a reverse proxy sits in front in production), falls back to `request.remote_addr`
+- Client IP resolution reads `X-Real-IP` (set by nginx via `proxy_set_header X-Real-IP $remote_addr;` in production), falls back to `request.remote_addr`. Deliberately **not** `X-Forwarded-For`: nginx's default config appends to it rather than replacing it, so the first element is client-controlled — sending an arbitrary `X-Forwarded-For` used to bypass both rate limits entirely
 - Both checks + the reservation happen atomically under one `threading.Lock` (`check_rate_limit`) to avoid a race between checking and incrementing
 - Concurrent slot is released in `run_download`'s `finally` block (`release_concurrent_slot`), so it's freed on both success and failure
 - Exceeding either limit returns HTTP 429 with a Russian-language error message, surfaced as-is by the frontend's existing error handling
+- The hourly limit's 429 response also includes `retry_after_seconds` (computed from the oldest timestamp in the IP's window), which the frontend turns into a live countdown in `#statusSub`. The concurrent-downloads limit never includes it — that slot frees up whenever a running download finishes, not on a fixed schedule, so there's no meaningful countdown to show
+
+## 404 Page
+
+`app.py` registers `@app.errorhandler(404)` returning `static/404.html` — a standalone page following the same self-contained CSS-variable pattern as `privacy.html`/`terms.html` (own `:root` copy, no shared stylesheet, `noindex`).
+
+## Background Janitor
+
+A daemon thread (`_janitor`, started at module import) runs every `JANITOR_INTERVAL` (10 min) and independently sweeps the app's four unbounded-growth points, each wrapped in its own try/except so one failure doesn't stop the others:
+
+- `jobs` entries older than `JOB_MAX_AGE` (1h, tracked via a `created_at` monotonic timestamp added at job creation) — catches jobs that ended in `status == "error"`, or finished jobs whose file the user never fetched (closed the tab)
+- Files in `downloads/` with `mtime` older than `FILE_MAX_AGE` (1h) — age-based and independent of the `jobs` dict by design, so it also catches raw/partial files left behind by a mid-conversion crash, not just files tied to a still-known job
+- `info_cache` entries past `INFO_CACHE_TTL`
+- `request_times` IPs with no timestamp left inside `RATE_LIMIT_WINDOW` after pruning (`concurrent_counts` is untouched — it's already correctly maintained by `release_concurrent_slot`)
+
+Safe as a single in-process thread only because production runs gunicorn with exactly one worker (see `deployment.md`) — with multiple workers each would run its own janitor over its own process-local state, same as the rate-limiting/cache/jobs correctness this whole app depends on.
+
+## SSRF Protection (`validate_url`)
+
+Both `/api/info` and `/api/download` call `validate_url(url)` before any yt-dlp invocation — yt-dlp's generic extractor will happily fetch any URL it's given, including internal targets (e.g. Umami on `127.0.0.1:3001`, cloud metadata IPs, RFC1918 ranges). It parses the URL, requires `http`/`https` with a hostname, resolves via `socket.getaddrinfo` (A and AAAA), and rejects if any resolved address is private/loopback/link-local/multicast/reserved/unspecified. One generic Russian error message regardless of which check failed, so nothing about the internal network is leaked.
+
+In `/api/info` it runs *after* the `info_cache` lookup (cached URLs were already validated when first cached, so this avoids adding resolver latency to every preview keystroke) but before any yt-dlp call. In `/api/download` it runs before `check_rate_limit`, so a rejected URL doesn't burn a rate-limit slot.
+
+**Known accepted limitation:** validation resolves DNS once here; yt-dlp resolves again independently later. A DNS-rebinding window exists between the two lookups (attacker's DNS answers public at validation time, private by the time yt-dlp connects). Out of scope for this threat model — not worth pinning the resolved address through to yt-dlp for it.

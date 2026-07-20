@@ -1,7 +1,10 @@
+import ipaddress
 import re
+import socket
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -33,10 +36,38 @@ info_cache: dict[str, dict] = {}   # url -> {"data": {...}, "ts": float}
 
 
 def get_client_ip() -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.remote_addr or "unknown"
+    return request.headers.get("X-Real-IP") or request.remote_addr or "unknown"
+
+
+def validate_url(url: str) -> str | None:
+    """
+    Return a Russian error message if url is not a safe, resolvable http(s) URL, else None.
+    Blocks SSRF against internal targets (e.g. Umami on 127.0.0.1, cloud metadata IPs,
+    RFC1918 ranges) by resolving the hostname and rejecting private/loopback/link-local/
+    multicast/reserved/unspecified addresses. Generic error message — doesn't leak which
+    check failed.
+
+    Known accepted limitation: this resolves DNS once here and yt-dlp resolves again later —
+    a DNS-rebinding window exists between the two lookups. Out of scope for this threat
+    model; not worth pinning the resolved address through to yt-dlp for it.
+    """
+    error = "Некорректная ссылка. Проверьте адрес."
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return error
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return error
+    try:
+        addrinfo = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror:
+        return error
+    for *_, sockaddr in addrinfo:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_multicast or ip.is_reserved or ip.is_unspecified):
+            return error
+    return None
 
 
 def check_rate_limit(ip: str) -> tuple[str, int | None] | None:
@@ -72,6 +103,61 @@ def release_concurrent_slot(ip: str) -> None:
             concurrent_counts[ip] -= 1
             if concurrent_counts[ip] <= 0:
                 del concurrent_counts[ip]
+
+
+# --- Background janitor (in-memory state + downloads/ never has an unbounded owner otherwise) ---
+JANITOR_INTERVAL = 600   # seconds
+JOB_MAX_AGE      = 3600  # seconds
+FILE_MAX_AGE     = 3600  # seconds
+
+
+def _janitor() -> None:
+    while True:
+        time.sleep(JANITOR_INTERVAL)
+        now = time.monotonic()
+
+        try:
+            stale_ids = [jid for jid, job in list(jobs.items())
+                         if now - job.get("created_at", now) > JOB_MAX_AGE]
+            for jid in stale_ids:
+                jobs.pop(jid, None)
+            if stale_ids:
+                logger.info("Janitor: evicted %d stale job(s)", len(stale_ids))
+        except Exception as e:
+            logger.warning("Janitor: jobs cleanup failed: %s", e)
+
+        try:
+            cutoff = time.time() - FILE_MAX_AGE
+            removed = 0
+            for f in OUTPUT_DIR.iterdir():
+                if f.is_file() and f.stat().st_mtime < cutoff:
+                    f.unlink(missing_ok=True)
+                    removed += 1
+            if removed:
+                logger.info("Janitor: removed %d stale file(s) from downloads/", removed)
+        except Exception as e:
+            logger.warning("Janitor: downloads/ cleanup failed: %s", e)
+
+        try:
+            with info_cache_lock:
+                stale_urls = [u for u, entry in info_cache.items()
+                              if now - entry["ts"] > INFO_CACHE_TTL]
+                for u in stale_urls:
+                    del info_cache[u]
+        except Exception as e:
+            logger.warning("Janitor: info_cache cleanup failed: %s", e)
+
+        try:
+            with rate_lock:
+                stale_ips = [ip for ip, times in request_times.items()
+                             if not [t for t in times if now - t < RATE_LIMIT_WINDOW]]
+                for ip in stale_ips:
+                    del request_times[ip]
+        except Exception as e:
+            logger.warning("Janitor: request_times cleanup failed: %s", e)
+
+
+threading.Thread(target=_janitor, daemon=True).start()
 
 FORMATS = {
     "mp3":  {"ext": "mp3",  "mime": "audio/mpeg"},
@@ -299,6 +385,10 @@ def get_info():
         if cached and time.monotonic() - cached["ts"] < INFO_CACHE_TTL:
             return jsonify(cached["data"])
 
+    validation_error = validate_url(url)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
@@ -335,6 +425,10 @@ def start_download():
     if fmt not in FORMATS:
         return jsonify({"error": "Unknown format"}), 400
 
+    validation_error = validate_url(url)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+
     ip = get_client_ip()
     limit_result = check_rate_limit(ip)
     if limit_result:
@@ -348,6 +442,7 @@ def start_download():
     jobs[job_id] = {
         "status": "pending", "stage": "pending",
         "percent": 0.0, "filename": None, "error": None,
+        "created_at": time.monotonic(),
     }
 
     threading.Thread(
