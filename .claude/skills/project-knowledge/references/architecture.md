@@ -170,3 +170,7 @@ Both `/api/info` and `/api/download` call `validate_url(url)` before any yt-dlp 
 In `/api/info` it runs *after* the `info_cache` lookup (cached URLs were already validated when first cached, so this avoids adding resolver latency to every preview keystroke) but before any yt-dlp call. In `/api/download` it runs before `check_rate_limit`, so a rejected URL doesn't burn a rate-limit slot.
 
 **Known accepted limitation:** validation resolves DNS once here; yt-dlp resolves again independently later. A DNS-rebinding window exists between the two lookups (attacker's DNS answers public at validation time, private by the time yt-dlp connects). Out of scope for this threat model — not worth pinning the resolved address through to yt-dlp for it.
+
+## HTTP Security Headers
+
+Browser-facing security headers (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, `Strict-Transport-Security`) are set at the nginx layer, not in `app.py` — see `deployment.md` → Security Headers for the exact directives and why `Content-Security-Policy` isn't there yet.
