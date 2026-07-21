@@ -23,7 +23,7 @@
   <meta name="twitter:title" content="Скачать аудио с YouTube в MP3, AAC, Opus — AudioGrab" />
   <meta name="twitter:description" content="Извлеките звук из любого видео YouTube и скачайте песню без видео — в MP3, AAC или Opus. Быстро и бесплатно." />
   <meta name="twitter:image" content="https://audiograb.ru/og-image.png" />
-  <link rel="stylesheet" href="/app.css?v=1" />
+  <link rel="stylesheet" href="/app.css?v=2" />
 </head>
 <body>
 <div class="card">
@@ -47,8 +47,8 @@
   <div class="preview-box" id="previewBox">
     <img class="preview-thumb" id="previewThumb" alt="" />
     <div class="preview-meta">
-      <div class="preview-title" id="previewTitle"></div>
-      <div class="preview-artist" id="previewArtist"></div>
+      <input type="text" class="preview-title-input" id="previewTitleInput" placeholder="Название" />
+      <input type="text" class="preview-artist-input" id="previewArtistInput" placeholder="Исполнитель" />
     </div>
   </div>
 
@@ -68,6 +68,22 @@
       <button class="q-btn" data-q="256">256</button>
       <button class="q-btn" data-q="320">320</button>
     </div>
+  </div>
+
+  <div class="trim-toggle" id="trimToggle"><span class="trim-toggle-icon">▸</span> Обрезать фрагмент</div>
+  <div class="trim-section" id="trimSection" style="display:none">
+    <div class="trim-row">
+      <div class="trim-field">
+        <label>С</label>
+        <input type="text" id="trimStart" placeholder="0:00" />
+      </div>
+      <div class="trim-field">
+        <label>По</label>
+        <input type="text" id="trimEnd" placeholder="мм:сс" />
+      </div>
+    </div>
+    <div class="trim-error" id="trimError"></div>
+    <div class="trim-note">При обрезке аудио перекодируется</div>
   </div>
 
   <button class="btn" id="startBtn">Скачать аудио</button>
@@ -186,6 +202,15 @@
       другие сайты, с которых умеет извлекать аудио библиотека yt-dlp.
     </p></div>
   </details>
+
+  <details class="faq-item">
+    <summary>Можно ли скачать только фрагмент?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Да — под выбором формата есть переключатель „Обрезать фрагмент". Включите его, укажите начало
+      и конец нужного отрезка (например, 0:30–1:15) и запустите скачивание — сервис сохранит только
+      выбранную часть трека.
+    </p></div>
+  </details>
 </section>
 
 <nav class="source-links">
@@ -284,6 +309,14 @@
         "@type": "Answer",
         "text": "Помимо YouTube и YouTube Music сервис поддерживает TikTok, SoundCloud и VK Видео, а также многие другие сайты, с которых умеет извлекать аудио библиотека yt-dlp."
       }
+    },
+    {
+      "@type": "Question",
+      "name": "Можно ли скачать только фрагмент?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Да — под выбором формата есть переключатель „Обрезать фрагмент\". Включите его, укажите начало и конец нужного отрезка (например, 0:30–1:15) и запустите скачивание — сервис сохранит только выбранную часть трека."
+      }
     }
   ]
 }
@@ -305,7 +338,7 @@
 }
 </script>
 
-<script src="/app.js?v=1"></script>
+<script src="/app.js?v=2"></script>
 <script defer src="https://analytics.audiograb.ru/script.js" data-website-id="19460776-616d-4b04-888d-509b1d7ebba3"></script>
 </body>
 </html>

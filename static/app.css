@@ -230,20 +230,38 @@ input[type="text"]::placeholder { color: var(--muted); }
   flex-shrink: 0;
 }
 .preview-meta { min-width: 0; }
-.preview-title {
+
+.preview-title-input,
+.preview-artist-input {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  font-family: inherit;
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background .15s, border-color .15s;
+}
+.preview-title-input:hover,
+.preview-artist-input:hover { border-color: var(--border); }
+.preview-title-input:focus,
+.preview-artist-input:focus { background: var(--bg); border-color: var(--accent); }
+.preview-title-input::placeholder,
+.preview-artist-input::placeholder { color: var(--muted); opacity: .6; }
+
+.preview-title-input {
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.preview-artist {
+.preview-artist-input {
   font-size: 12px;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   margin-top: 2px;
 }
 
@@ -283,6 +301,43 @@ input[type="text"]::placeholder { color: var(--muted); }
 }
 .q-btn.active { background: #2a0a0a; border-color: var(--accent); color: var(--accent); }
 .q-btn:hover:not(.active) { border-color: #555; color: var(--text); }
+
+.trim-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 8px;
+  transition: color .15s;
+}
+.trim-toggle:hover { color: var(--text); }
+.trim-toggle-icon {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform .2s;
+}
+.trim-toggle.expanded .trim-toggle-icon { transform: rotate(90deg); }
+
+.trim-section { margin-bottom: 20px; }
+.trim-row { display: flex; gap: 8px; }
+.trim-field { flex: 1; }
+.trim-field label { margin-bottom: 4px; }
+.trim-field input[type="text"] { margin-bottom: 0; padding: 10px 12px; font-size: 13px; }
+
+.trim-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  margin-top: 6px;
+}
+.trim-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+}
 
 .btn {
   width: 100%;

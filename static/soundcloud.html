@@ -23,7 +23,7 @@
   <meta name="twitter:title" content="Скачать трек с SoundCloud в MP3 — AudioGrab" />
   <meta name="twitter:description" content="Скачать музыку с SoundCloud: вставьте ссылку на трек — сервис извлечёт аудио в MP3, AAC или Opus. Если исходный поток уже в AAC, перекодирования не будет. Бесплатно, без установки программ." />
   <meta name="twitter:image" content="https://audiograb.ru/og-image.png" />
-  <link rel="stylesheet" href="/app.css?v=1" />
+  <link rel="stylesheet" href="/app.css?v=2" />
 </head>
 <body>
 <div class="card">
@@ -47,8 +47,8 @@
   <div class="preview-box" id="previewBox">
     <img class="preview-thumb" id="previewThumb" alt="" />
     <div class="preview-meta">
-      <div class="preview-title" id="previewTitle"></div>
-      <div class="preview-artist" id="previewArtist"></div>
+      <input type="text" class="preview-title-input" id="previewTitleInput" placeholder="Название" />
+      <input type="text" class="preview-artist-input" id="previewArtistInput" placeholder="Исполнитель" />
     </div>
   </div>
 
@@ -68,6 +68,22 @@
       <button class="q-btn" data-q="256">256</button>
       <button class="q-btn" data-q="320">320</button>
     </div>
+  </div>
+
+  <div class="trim-toggle" id="trimToggle"><span class="trim-toggle-icon">▸</span> Обрезать фрагмент</div>
+  <div class="trim-section" id="trimSection" style="display:none">
+    <div class="trim-row">
+      <div class="trim-field">
+        <label>С</label>
+        <input type="text" id="trimStart" placeholder="0:00" />
+      </div>
+      <div class="trim-field">
+        <label>По</label>
+        <input type="text" id="trimEnd" placeholder="мм:сс" />
+      </div>
+    </div>
+    <div class="trim-error" id="trimError"></div>
+    <div class="trim-note">При обрезке аудио перекодируется</div>
   </div>
 
   <button class="btn" id="startBtn">Скачать аудио</button>
@@ -250,7 +266,7 @@
 }
 </script>
 
-<script src="/app.js?v=1"></script>
+<script src="/app.js?v=2"></script>
 <link rel="preconnect" href="https://analytics.audiograb.ru">
 <script defer src="https://analytics.audiograb.ru/script.js" data-website-id="19460776-616d-4b04-888d-509b1d7ebba3"></script>
 </body>

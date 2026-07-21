@@ -12,8 +12,13 @@ const qualitySection = document.getElementById('qualitySection');
 const qualityRow   = document.getElementById('qualityRow');
 const previewBox   = document.getElementById('previewBox');
 const previewThumb = document.getElementById('previewThumb');
-const previewTitle = document.getElementById('previewTitle');
-const previewArtist = document.getElementById('previewArtist');
+const previewTitleInput  = document.getElementById('previewTitleInput');
+const previewArtistInput = document.getElementById('previewArtistInput');
+const trimToggle    = document.getElementById('trimToggle');
+const trimSection   = document.getElementById('trimSection');
+const trimStartInput = document.getElementById('trimStart');
+const trimEndInput   = document.getElementById('trimEnd');
+const trimError     = document.getElementById('trimError');
 
 let selectedFmt     = 'aac';
 let selectedQuality = 192;
@@ -22,10 +27,87 @@ let pollStopped     = true;
 let rateLimitTimer  = null;
 let previewTimer    = null;
 let previewRequestId = 0;
+let currentTrackUrl = null; // URL the trim fields currently belong to
+let currentDuration  = null;
+
+function collapseTrim() {
+  trimToggle.classList.remove('expanded');
+  trimSection.style.display = 'none';
+}
+
+function resetTrimFields() {
+  trimStartInput.value = '';
+  trimEndInput.value = '';
+  trimError.textContent = '';
+}
+
+trimToggle.addEventListener('click', () => {
+  const expanding = trimSection.style.display === 'none';
+  trimSection.style.display = expanding ? 'block' : 'none';
+  trimToggle.classList.toggle('expanded', expanding);
+});
+
+function parseTimeToSeconds(str) {
+  str = str.trim();
+  if (!str) return null;
+  if (/^\d+(\.\d+)?$/.test(str)) return parseFloat(str);
+  const parts = str.split(':');
+  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return NaN;
+  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
+}
+
+function formatSecondsAsTime(totalSeconds) {
+  totalSeconds = Math.round(totalSeconds);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Validates the trim inputs before submit. Returns { active:false } when
+// trim isn't in play (section collapsed, or expanded but both fields blank),
+// { active:false, invalid:true } when it's in play but invalid (error text
+// already set on trimError), or { active:true, start, end } (seconds or null
+// for an open-ended boundary) when good to send.
+function validateTrim() {
+  trimError.textContent = '';
+  if (trimSection.style.display === 'none') return { active: false };
+
+  const startRaw = trimStartInput.value.trim();
+  const endRaw   = trimEndInput.value.trim();
+  if (!startRaw && !endRaw) return { active: false };
+
+  const start = startRaw ? parseTimeToSeconds(startRaw) : null;
+  const end   = endRaw ? parseTimeToSeconds(endRaw) : null;
+
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    trimError.textContent = 'Не удалось распознать время. Используйте формат мм:сс или чч:мм:сс.';
+    return { active: false, invalid: true };
+  }
+  if (start !== null && end !== null && start >= end) {
+    trimError.textContent = 'Начало должно быть раньше конца.';
+    return { active: false, invalid: true };
+  }
+  if (currentDuration) {
+    if (end !== null && end > currentDuration) {
+      trimError.textContent = 'Конец не может быть больше длительности трека.';
+      return { active: false, invalid: true };
+    }
+    if (start !== null && end === null && start >= currentDuration) {
+      trimError.textContent = 'Начало не может быть больше длительности трека.';
+      return { active: false, invalid: true };
+    }
+  }
+  return { active: true, start, end };
+}
 
 function hidePreview() {
   previewBox.classList.remove('visible');
   previewThumb.src = '';
+  currentTrackUrl = null;
+  currentDuration = null;
 }
 
 async function fetchPreview(url) {
@@ -40,10 +122,24 @@ async function fetchPreview(url) {
     if (requestId !== previewRequestId) return; // stale response, URL changed since
     if (data.error) { hidePreview(); return; }
 
+    if (url !== currentTrackUrl) {
+      // Genuinely different track from whatever the trim fields were last
+      // set for — clear them so trim from the previous track can't silently
+      // carry over onto this one.
+      resetTrimFields();
+      collapseTrim();
+      currentTrackUrl = url;
+    }
+
     previewThumb.src = data.thumbnail || '';
-    previewTitle.textContent = data.title || '';
-    previewArtist.textContent = data.artist || '';
+    previewTitleInput.value = data.title || '';
+    previewArtistInput.value = data.artist || '';
     previewBox.classList.add('visible');
+
+    currentDuration = typeof data.duration === 'number' ? data.duration : null;
+    if (currentDuration && !trimEndInput.value.trim()) {
+      trimEndInput.value = formatSecondsAsTime(currentDuration);
+    }
   } catch {
     if (requestId === previewRequestId) hidePreview();
   }
@@ -159,17 +255,30 @@ startBtn.addEventListener('click', async () => {
   const url = urlInput.value.trim();
   if (!url) { urlInput.focus(); return; }
 
+  const trim = validateTrim();
+  if (trim.invalid) return;
+
   reset();
   startBtn.disabled = true;
   statusBox.classList.add('visible');
   setStage('pending', 0, '');
+
+  const payload = { url, format: selectedFmt, quality: selectedQuality };
+  if (trim.active) {
+    if (trim.start !== null) payload.trim_start = trim.start;
+    if (trim.end !== null) payload.trim_end = trim.end;
+  }
+  const titleVal  = previewTitleInput.value.trim();
+  const artistVal = previewArtistInput.value.trim();
+  if (titleVal) payload.title = titleVal;
+  if (artistVal) payload.artist = artistVal;
 
   let jobId;
   try {
     const res = await fetch('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, format: selectedFmt, quality: selectedQuality }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (data.error) {

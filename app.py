@@ -171,8 +171,32 @@ FMT_SELECTORS = {
     "opus": "bestaudio[ext=webm]/bestaudio/best",
 }
 
+# Guards against a near-empty/corrupt output (e.g. trim_start past the
+# track's actual end producing a near-zero-length file from ffmpeg).
+MIN_OUTPUT_BYTES = 2048
+
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+
+def sanitize_tag(value, max_len: int = 200) -> str | None:
+    """Clean an optional user-supplied tag (title/artist): strip control chars
+    and whitespace, cap length, treat empty-after-trim as absent."""
+    if not isinstance(value, str):
+        return None
+    value = re.sub(r'[\x00-\x1f\x7f]', '', value).strip()
+    return value[:max_len] if value else None
+
+
+def parse_trim_value(value) -> float | None:
+    """Parse an optional trim boundary to a non-negative float. Raises
+    (TypeError, ValueError) if value is present but not a valid number."""
+    if value is None:
+        return None
+    f = float(value)
+    if f < 0:
+        raise ValueError("negative trim value")
+    return f
 
 
 def _cleanup_file(filepath: Path, attempts: int = 5, delay: float = 0.5) -> None:
@@ -191,27 +215,41 @@ def _cleanup_file(filepath: Path, attempts: int = 5, delay: float = 0.5) -> None
             time.sleep(delay)
 
 
-def ffmpeg_codec_args(fmt: str, input_path: Path, quality: int) -> list[str]:
-    """Return ffmpeg codec arguments for the given format."""
+def ffmpeg_codec_args(fmt: str, input_path: Path, quality: int, trimming: bool = False) -> list[str]:
+    """Return ffmpeg codec arguments for the given format.
+
+    Stream-copy is disabled whenever trimming is active: -ss/-to with -c copy
+    cuts on packet boundaries and can produce leading garbage/silence —
+    accurate cuts need decoding, so a trim always re-encodes.
+    """
     ext = input_path.suffix.lower()
     if fmt == "mp3":
         return ["-codec:a", "libmp3lame", "-b:a", f"{quality}k"]
     elif fmt == "aac":
         # Copy if source is already aac/m4a, else re-encode
-        if ext in (".m4a", ".mp4"):
+        if not trimming and ext in (".m4a", ".mp4"):
             return ["-codec:a", "copy"]
         return ["-codec:a", "aac", "-b:a", "192k"]
     elif fmt == "opus":
         # Copy opus stream if source is webm/opus
-        if ext in (".webm", ".opus"):
+        if not trimming and ext in (".webm", ".opus"):
             return ["-codec:a", "copy"]
         return ["-codec:a", "libopus", "-b:a", "160k"]
     return []
 
 
 def _build_ffmpeg_cmd(input_path: Path, output_path: Path, codec_args: list[str],
-                       thumbnail_path: Path | None) -> list[str]:
-    cmd = ["ffmpeg", "-y", "-i", str(input_path)]
+                       thumbnail_path: Path | None,
+                       trim_start: float | None = None, trim_end: float | None = None,
+                       title: str | None = None, artist: str | None = None) -> list[str]:
+    cmd = ["ffmpeg", "-y"]
+    # -ss/-to as INPUT options (before -i) — apply only to the audio input,
+    # not the thumbnail input added below.
+    if trim_start is not None:
+        cmd += ["-ss", str(trim_start)]
+    if trim_end is not None:
+        cmd += ["-to", str(trim_end)]
+    cmd += ["-i", str(input_path)]
     if thumbnail_path:
         cmd += ["-i", str(thumbnail_path), "-map", "0:a", "-map", "1:v"]
     else:
@@ -219,6 +257,10 @@ def _build_ffmpeg_cmd(input_path: Path, output_path: Path, codec_args: list[str]
         # thumbnail track inside a webm) isn't picked up by default.
         cmd += ["-vn"]
     cmd += codec_args
+    if title:
+        cmd += ["-metadata", f"title={title}"]
+    if artist:
+        cmd += ["-metadata", f"artist={artist}"]
     if thumbnail_path:
         cmd += ["-c:v", "mjpeg", "-disposition:v:0", "attached_pic",
                 "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
@@ -228,18 +270,25 @@ def _build_ffmpeg_cmd(input_path: Path, output_path: Path, codec_args: list[str]
 
 def run_ffmpeg_with_progress(job_id: str, input_path: Path, output_path: Path,
                               duration: float, quality: int, fmt: str,
-                              thumbnail_path: Path | None = None) -> bool:
+                              thumbnail_path: Path | None = None,
+                              trim_start: float | None = None, trim_end: float | None = None,
+                              title: str | None = None, artist: str | None = None) -> bool:
     """
     Run ffmpeg and parse its -progress output to update jobs[job_id]['percent']
-    from 90.00 → 99.99 during conversion. If thumbnail_path is given, embeds it
-    as cover art; on failure, retries once without the cover so a container/codec
-    quirk with the thumbnail doesn't break the whole conversion.
+    from 90.00 → 99.99 during conversion. `duration` is the duration of the
+    *output* (trimmed length when trim_start/trim_end are set), so the mapping
+    stays accurate. If thumbnail_path is given, embeds it as cover art; on
+    failure, retries once without the cover so a container/codec quirk with
+    the thumbnail doesn't break the whole conversion.
     """
-    codec_args = ffmpeg_codec_args(fmt, input_path, quality)
+    trimming = trim_start is not None or trim_end is not None
+    codec_args = ffmpeg_codec_args(fmt, input_path, quality, trimming=trimming)
 
     def attempt(with_cover: bool) -> bool:
         cmd = _build_ffmpeg_cmd(input_path, output_path, codec_args,
-                                 thumbnail_path if with_cover else None)
+                                 thumbnail_path if with_cover else None,
+                                 trim_start=trim_start, trim_end=trim_end,
+                                 title=title, artist=artist)
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
@@ -264,7 +313,9 @@ def run_ffmpeg_with_progress(job_id: str, input_path: Path, output_path: Path,
     return attempt(with_cover=False)
 
 
-def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None:
+def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
+                  trim_start: float | None = None, trim_end: float | None = None,
+                  custom_title: str | None = None, custom_artist: str | None = None) -> None:
     output_template = str(OUTPUT_DIR / f"{job_id}_%(title)s.%(ext)s")
     downloaded_file: list[Path | None] = [None]
 
@@ -299,9 +350,9 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
             raise ValueError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info     = ydl.extract_info(url, download=True)
-            title    = sanitize_filename(info.get("title", job_id))
-            duration = float(info.get("duration") or 0)
+            info          = ydl.extract_info(url, download=True)
+            display_title = sanitize_filename(custom_title or info.get("title", job_id))
+            duration      = float(info.get("duration") or 0)
 
         # Locate the downloaded file
         input_path = downloaded_file[0]
@@ -325,10 +376,20 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
         ext         = FORMATS[fmt]["ext"]
         output_path = OUTPUT_DIR / f"{job_id}_out.{ext}"
 
+        # Trimmed duration for progress mapping — full source duration otherwise
+        if trim_start is not None or trim_end is not None:
+            conv_start    = trim_start or 0.0
+            conv_end      = trim_end if trim_end is not None else duration
+            conv_duration = max(0.0, conv_end - conv_start)
+        else:
+            conv_duration = duration
+
         # Convert / remux with live progress
         jobs[job_id]["stage"] = "converting"
-        ok = run_ffmpeg_with_progress(job_id, input_path, output_path, duration, quality, fmt,
-                                       thumbnail_path=thumb_path)
+        ok = run_ffmpeg_with_progress(job_id, input_path, output_path, conv_duration, quality, fmt,
+                                       thumbnail_path=thumb_path,
+                                       trim_start=trim_start, trim_end=trim_end,
+                                       title=custom_title, artist=custom_artist)
 
         # Remove raw source file
         input_path.unlink(missing_ok=True)
@@ -336,10 +397,16 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str) -> None
         if not ok:
             raise RuntimeError("FFmpeg conversion failed")
 
+        # Guards against e.g. trim_start past the track's actual end, which
+        # ffmpeg can happily "succeed" on while producing a near-empty file.
+        if not output_path.exists() or output_path.stat().st_size < MIN_OUTPUT_BYTES:
+            output_path.unlink(missing_ok=True)
+            raise RuntimeError("Не удалось обработать фрагмент. Проверьте параметры обрезки.")
+
         jobs[job_id].update({
             "status":   "done",
             "filename": output_path.name,
-            "title":    title,
+            "title":    display_title,
             "percent":  100.0,
         })
 
@@ -444,6 +511,17 @@ def start_download():
     if validation_error:
         return jsonify({"error": validation_error}), 400
 
+    try:
+        trim_start = parse_trim_value(data.get("trim_start"))
+        trim_end   = parse_trim_value(data.get("trim_end"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Некорректные параметры обрезки фрагмента."}), 400
+    if trim_start is not None and trim_end is not None and trim_start >= trim_end:
+        return jsonify({"error": "Некорректные параметры обрезки фрагмента."}), 400
+
+    title  = sanitize_tag(data.get("title"))
+    artist = sanitize_tag(data.get("artist"))
+
     ip = get_client_ip()
     limit_result = check_rate_limit(ip)
     if limit_result:
@@ -461,7 +539,13 @@ def start_download():
     }
 
     threading.Thread(
-        target=run_download, args=(job_id, url, fmt, quality, ip), daemon=True
+        target=run_download,
+        args=(job_id, url, fmt, quality, ip),
+        kwargs={
+            "trim_start": trim_start, "trim_end": trim_end,
+            "custom_title": title, "custom_artist": artist,
+        },
+        daemon=True,
     ).start()
 
     return jsonify({"job_id": job_id})

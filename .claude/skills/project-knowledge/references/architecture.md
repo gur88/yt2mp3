@@ -67,11 +67,39 @@ SEO copy makes only claims verified against actual `yt-dlp`/`ffmpeg` behavior �
 | aac    | `.m4a`        | stream-copy if source is already `.m4a`/`.mp4`, else re-encode with `aac` @192k |
 | opus   | `.opus`       | stream-copy if source is `.webm`/`.opus`, else re-encode with `libopus` @160k |
 
+The stream-copy paths above are disabled whenever a trim is active — see Trim below.
+
+## Trim (Audio Fragment)
+
+`POST /api/download` accepts optional `trim_start`/`trim_end` (float seconds). Server validates both are non-negative and `start < end` when both are given — checked right after `validate_url`, before `check_rate_limit` (same ordering rationale: an invalid request shouldn't burn quota). Duration-based validation (`end` ≤ track length) is client-side only — the server doesn't know the track's duration until yt-dlp extracts it inside `run_download`, well after the request already returned a job id.
+
+**Forced re-encode.** Whenever a trim is requested, stream-copy is disabled for aac/opus (`ffmpeg_codec_args(..., trimming=True)`) — `-ss`/`-to` with `-c copy` cuts on packet boundaries and can produce leading garbage/silence; an accurate cut needs decoding.
+
+**ffmpeg invocation.** `-ss <start>`/`-to <end>` are added as INPUT options, placed before the audio `-i` in `_build_ffmpeg_cmd`. The cover-art thumbnail is a *second*, later `-i` with no trim flags of its own, so the trim only ever applies to the audio input.
+
+**Progress mapping.** `run_ffmpeg_with_progress`'s 90→100% mapping is driven entirely by the `duration` argument it's given; `run_download` computes that as `trim_end - trim_start` (falling back to the source's full duration on either open end) before calling it, so the bar doesn't stall on a fraction when trimming is active. The download phase (0–90%) still fetches the whole source — yt-dlp can't partial-download — that's expected, not a bug.
+
+**Corrupt-output guard.** After a successful ffmpeg run, `run_download` checks `output_path` exists and is at least `MIN_OUTPUT_BYTES` (2048 bytes) — guards against e.g. a `trim_start` past the track's real end, which ffmpeg can "succeed" on (return code 0) while writing a near-empty file. This bypasses client-side duration validation via a direct API call, since the server has no duration to check against at request time. Fails the job with a Russian error (`jobs[job_id]["status"] = "error"`) instead of serving a broken file.
+
+**Cover art** embedding is unaffected by trimming (still mp3/aac only, per Format Handling above) — the thumbnail's own `-i` never gets a trim flag.
+
+**Client-side (`static/app.js`):** the trim fields are cleared and the section collapses whenever the previewed track's URL changes (`currentTrackUrl`), so a trim range left over from a previously downloaded track can't silently carry over onto the next one. "By"-field prefill with the track duration only happens when the field is currently empty.
+
 ## Track Preview (`/api/info`)
 
 `POST /api/info {url}` runs `yt_dlp.extract_info(url, download=False)` — metadata only, no file ever touches disk — and returns `{title, artist, thumbnail, duration}` (`artist` falls back through `artist → uploader → channel`, since not every video sets an explicit artist tag). The frontend calls this on a 600ms debounce after the URL input changes (`static/index.html`), guarding against out-of-order responses with a `previewRequestId` counter so a stale response for an old URL can't overwrite the preview for a newer one.
 
 Results are cached in-memory for 10 minutes (`info_cache`, keyed by the raw URL string — no normalization, so `youtu.be/X` and `youtube.com/watch?v=X` cache separately). Only successful lookups are cached; errors are never cached, so a transient extraction failure doesn't stick for the full TTL.
+
+## Editable Tags (Title/Artist)
+
+`/api/info`'s `title`/`artist` populate two plain `<input>` fields in the preview box (`static/app.js`), styled to look like static text until focused (`.preview-title-input`/`.preview-artist-input` in `app.css`). Editing them is optional — `POST /api/download` accepts optional `title`/`artist` strings, sanitized server-side (`sanitize_tag`: strip control characters, trim whitespace, cap at 200 chars, empty-after-trim treated as absent).
+
+When provided, `_build_ffmpeg_cmd` adds `-metadata title=...`/`-metadata artist=...` — works for all three formats (opus lands these in Vorbis comments). When *not* provided, no `-metadata` flags are added at all, so a plain conversion with no tag edits produces the same output as before this feature existed (aac/opus stream-copy paths untouched, no extra mux pass added).
+
+The download filename still goes through the existing `sanitize_filename`, now applied to the custom title when given, falling back to the extracted title otherwise — dangerous filesystem characters get stripped the same way regardless of source.
+
+If the user never triggered a preview (pasted a URL and hit download immediately), the tag inputs are empty placeholders — nothing is sent, so behavior is identical to before: extracted metadata only.
 
 ## Playlist URLs Are Rejected
 
