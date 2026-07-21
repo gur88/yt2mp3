@@ -159,6 +159,24 @@ urlInput.addEventListener('input', () => {
   previewTimer = setTimeout(() => fetchPreview(url), 600);
 });
 
+// Incoming Web Share Target (Android): the OS share sheet lands here as
+// /?title=...&text=...&url=... — Android apps are inconsistent about which
+// param carries the actual link (YouTube commonly uses `text`), so `url` is
+// checked first, then `text`. Reuses the exact same input->preview path as
+// manual typing via a synthetic 'input' event, instead of duplicating the
+// debounce/fetch logic here.
+(function handleIncomingShare() {
+  const params = new URLSearchParams(location.search);
+  const urlMatch = /https?:\/\/\S+/;
+  const found = (params.get('url') || '').match(urlMatch)
+             || (params.get('text') || '').match(urlMatch);
+  if (!found) return;
+
+  urlInput.value = found[0];
+  urlInput.dispatchEvent(new Event('input'));
+  history.replaceState(null, '', location.pathname);
+})();
+
 function stopPolling() {
   pollStopped = true;
   clearInterval(pollTimer);
@@ -407,3 +425,11 @@ cookieAcceptBtn.addEventListener('click', () => {
   localStorage.setItem('cookie_consent', '1');
   cookieBanner.classList.remove('visible');
 });
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    try {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    } catch {}
+  });
+}

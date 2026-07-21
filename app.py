@@ -9,7 +9,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file, after_this_request
+from flask import Flask, jsonify, request, send_file, send_from_directory, after_this_request
 import yt_dlp
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -442,6 +442,20 @@ def soundcloud():
 @app.route("/vk")
 def vk():
     return app.send_static_file("vk.html")
+
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    return send_from_directory(app.static_folder, "manifest.webmanifest",
+                                mimetype="application/manifest+json")
+
+
+@app.route("/sw.js")
+def service_worker():
+    response = send_from_directory(app.static_folder, "sw.js",
+                                    mimetype="application/javascript")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.errorhandler(404)
