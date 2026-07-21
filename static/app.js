@@ -19,6 +19,7 @@ const trimSection   = document.getElementById('trimSection');
 const trimStartInput = document.getElementById('trimStart');
 const trimEndInput   = document.getElementById('trimEnd');
 const trimError     = document.getElementById('trimError');
+const trimReset     = document.getElementById('trimReset');
 
 let selectedFmt     = 'aac';
 let selectedQuality = 192;
@@ -45,6 +46,12 @@ trimToggle.addEventListener('click', () => {
   const expanding = trimSection.style.display === 'none';
   trimSection.style.display = expanding ? 'block' : 'none';
   trimToggle.classList.toggle('expanded', expanding);
+});
+
+trimReset.addEventListener('click', () => {
+  trimStartInput.value = '';
+  trimEndInput.value = currentDuration ? formatSecondsAsTime(currentDuration) : '';
+  trimError.textContent = '';
 });
 
 function parseTimeToSeconds(str) {
