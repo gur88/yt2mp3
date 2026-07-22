@@ -138,8 +138,9 @@ body {
 .site-footer .sep { color: var(--border); }
 
 .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+.logo-text-wrap { display: flex; flex-direction: column; gap: 2px; }
 .logo-text { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
-.logo-text span { color: var(--accent); }
+.logo-subtitle { font-size: 12px; font-weight: 500; color: var(--muted); }
 
 .cookie-banner {
   position: fixed;
@@ -524,6 +525,13 @@ input.preview-artist-input {
 
 .divider { height: 1px; background: var(--border); margin: 28px 0; }
 .hint { font-size: 11px; color: #555; text-align: center; line-height: 1.6; }
+.hint a {
+  color: #555;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.15);
+  transition: color .15s;
+}
+.hint a:hover { color: var(--muted); }
 
 .source-links {
   width: 100%;

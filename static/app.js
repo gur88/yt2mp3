@@ -35,6 +35,37 @@ let previewRequestId = 0;
 let currentTrackUrl = null; // URL the trim fields currently belong to
 let currentDuration  = null;
 
+// Normalizes a URL to a coarse source label for analytics — domain-level
+// only, never the full URL or video ID (see privacy.html / architecture.md).
+// endsWith-based subdomain matching (not an exact-host list) so things like
+// music.youtube.com or m.youtube.com — common from mobile share-target
+// links — land under 'youtube' instead of silently skewing into 'other'.
+function getSourceLabel(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'other';
+  }
+  const is = (base) => host === base || host.endsWith('.' + base);
+  if (is('youtube.com') || is('youtu.be')) return 'youtube';
+  if (is('tiktok.com')) return 'tiktok';
+  if (is('soundcloud.com')) return 'soundcloud';
+  if (is('vk.com') || is('vkvideo.ru')) return 'vk';
+  return 'other';
+}
+
+// Fire-and-forget analytics — never awaited, never allowed to throw into
+// the caller. Silent no-op (zero console output) when Umami isn't loaded
+// at all (adblock, script blocked, analytics host down).
+function trackEvent(name, data) {
+  try {
+    if (window.umami && typeof window.umami.track === 'function') {
+      window.umami.track(name, data);
+    }
+  } catch {}
+}
+
 function collapseTrim() {
   trimToggle.classList.remove('expanded');
   trimSection.style.display = 'none';
@@ -184,7 +215,7 @@ async function fetchPreview(url) {
     });
     const data = await res.json();
     if (requestId !== previewRequestId) return; // stale response, URL changed since
-    if (data.error) { hidePreview(); return; }
+    if (data.error) { trackEvent('preview_error', { source: getSourceLabel(url) }); hidePreview(); return; }
 
     if (url !== currentTrackUrl) {
       // Genuinely different track from whatever the trim fields were last
@@ -444,6 +475,12 @@ startBtn.addEventListener('click', async () => {
 
     if (job.status === 'done') {
       stopPolling();
+      // payload.format (not the live selectedFmt) — the format buttons stay
+      // clickable during conversion, so selectedFmt could have moved on to
+      // a different pending selection by the time this fires. Same for
+      // `url`: it's the const captured at job-start, not urlInput's current
+      // (possibly since-replaced) value.
+      trackEvent('job_done', { source: getSourceLabel(url), format: payload.format });
       setStage('done', 100, job.title);
       const extLabel = { mp3: 'MP3', aac: 'AAC (.m4a)', opus: 'Opus' }[selectedFmt] || selectedFmt.toUpperCase();
       downloadBtn.textContent = `⬇ Скачать ${extLabel}`;
@@ -460,6 +497,7 @@ startBtn.addEventListener('click', async () => {
 
     } else if (job.status === 'error') {
       stopPolling();
+      trackEvent('job_error', { source: getSourceLabel(url) });
       setError(job.error || 'Неизвестная ошибка');
       startBtn.disabled = false;
 

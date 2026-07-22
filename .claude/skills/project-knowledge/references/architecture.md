@@ -39,7 +39,9 @@ Same fully-functional tool card as `/`, wrapped in source-specific SEO content: 
 
 Each page's input placeholder is source-specific (e.g. `https://vkvideo.ru/video-...` on `/vk`); format defaults are unchanged (AAC preselected) since `app.js` doesn't vary behavior per page.
 
-Cross-linking: a `.source-links` nav block on every tool page links to the other three, always omitting a link to itself (main page links to the 3 landing pages; each landing page links to the main page and its two siblings).
+Cross-linking: a `.source-links` nav block on every tool page links to the other three, always omitting a link to itself (main page links to the 3 landing pages; each landing page links to the main page and its two siblings). The under-button hint line (`.hint`, "Работает с YouTube, TikTok, SoundCloud, VK Видео и многими другими сайтами.") follows the same self-omission rule at a second location on the page — three of the four source names are links to their pages, the page's own source stays plain text. Link styling is deliberately subdued (`.hint a`): underlined by default so it still reads as a link against plain muted text, lightening only slightly on hover — no accent red, so it never competes visually with the CTA button just above it.
+
+**Card header.** The card's `.logo-text` is a plain `<div>`, not a heading — the page's actual (and only) `<h1>` lives in the SEO content block below, so changing the card header never touches heading semantics. All four pages show the brand "AudioGrab" plus a page-specific subtitle in `.logo-subtitle` (`аудио из видео` / `звук из TikTok` / `треки с SoundCloud` / `аудио из VK Видео`) — replacing the earlier literal "YT → Audio", which read as a YouTube-only tool even on the TikTok/SoundCloud/VK pages and undercut the actual brand.
 
 SEO copy makes only claims verified against actual `yt-dlp`/`ffmpeg` behavior — e.g. the SoundCloud page doesn't claim Opus ever avoids re-encoding (tested: SoundCloud never serves a native webm/opus stream to yt-dlp, so `opus` requests always re-encode) and only says AAC *may* copy without re-encoding, since that depends on whether the specific track happens to have an HLS-AAC source (confirmed both ways: one test track only had MP3, another had `hls_aac_160k` which the AAC format request does stream-copy — verified via `ffprobe` bitrate matching the source's 160k exactly, since a re-encode would show the code's fixed 192k target instead).
 
@@ -159,6 +161,23 @@ FAQ items are native `<details>`/`<summary>`, but with custom JS instead of defa
 ## Cookie Consent Banner
 
 `static/index.html` shows a fixed bottom banner (non-blocking, just a notice — no accept/reject choice since the only cookie is the technical session cookie for rate limiting, not tracking) on first visit, styled with the same `:root` CSS variables as the rest of the page. Dismissal is recorded in `localStorage` (`cookie_consent` key) so it doesn't reappear.
+
+## Analytics Events (Umami)
+
+Custom Umami events (`window.umami.track(name, data)`) give per-source error tracking a graph instead of relying on user complaints — the realistic failure mode here is source-specific (e.g. YouTube tightening anti-bot on datacenter IPs, or TikTok/VK breaking their extractor after a site update).
+
+Three events, all fired client-side from `static/app.js`:
+- `preview_error` — `/api/info` returned an error (earliest signal of an extractor problem, before the user even attempts a download)
+- `job_error` — `/api/status` polling reported a failed job
+- `job_done` — the job completed successfully; also carries `format` (mp3/aac/opus) — free product-usage insight, and the denominator for computing an error *rate* per source (raw error counts alone just track traffic, not health)
+
+Every event carries `source`, never the full URL or video ID (see `getSourceLabel(url)`): the URL's hostname, normalized to `youtube` / `tiktok` / `soundcloud` / `vk` / `other`. Matching is by `endsWith`-subdomain, not an exact-host list — `music.youtube.com` and `m.youtube.com` both land under `youtube` rather than `other`, which matters in practice since mobile share-target links (see PWA below) commonly arrive as `m.youtube.com`. Both of VK's live video domains are covered (`vk.com` — what copy-pasting a link from the VK web UI produces — and `vkvideo.ru`, the site's own `/vk` placeholder domain) and normalize to the same `vk` label. An unparseable/empty URL (`new URL()` throws) → `other`, never a crash.
+
+**Correctness note:** `job_error`/`job_done` use the `url`/`format` values captured in the `startBtn` click-handler closure at job-start time (`payload.format`, the `url` const), not a live re-read of `urlInput.value`/`selectedFmt` when the status poll resolves. Both the URL field and the format buttons stay interactive during an in-flight conversion, so by the time a job finishes the user may already be looking at a different link or format — tracking the live DOM state at that point would silently mislabel the event.
+
+**Robustness.** `trackEvent(name, data)` wraps every call: silent no-op with zero console output if `window.umami` isn't present at all (adblock, script blocked, analytics host down), never awaited (fire-and-forget, can't delay or break the core download flow).
+
+**Accepted limitation:** client-side-only events miss adblock users entirely, and this is trend monitoring, not accounting — a server-side event push would be more complete but isn't worth the added complexity for what this is used for (spotting a source-specific failure-rate trend, not precise counting).
 
 ## Data Model
 
