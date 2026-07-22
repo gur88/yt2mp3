@@ -25,7 +25,7 @@
   <meta name="twitter:title" content="Скачать музыку из TikTok в MP3 без видео — AudioGrab" />
   <meta name="twitter:description" content="Скачать звук из TikTok в MP3 или AAC: вставьте ссылку на видео — сервис извлечёт аудиодорожку без сохранения самого ролика. Бесплатно, без регистрации." />
   <meta name="twitter:image" content="https://audiograb.ru/og-image.png" />
-  <link rel="stylesheet" href="/app.css?v=3" />
+  <link rel="stylesheet" href="/app.css?v=4" />
 </head>
 <body>
 <div class="card">
@@ -44,13 +44,17 @@
   </div>
 
   <label>Ссылка на видео или трек</label>
-  <input type="text" id="urlInput" placeholder="https://www.tiktok.com/@user/video/..." />
+  <div class="url-row">
+    <input type="text" id="urlInput" placeholder="https://www.tiktok.com/@user/video/..." />
+    <button type="button" class="paste-btn" id="pasteBtn" style="display:none">Вставить</button>
+  </div>
 
   <div class="preview-box" id="previewBox">
     <img class="preview-thumb" id="previewThumb" alt="" />
     <div class="preview-meta">
       <input type="text" class="preview-title-input" id="previewTitleInput" placeholder="Название" />
       <input type="text" class="preview-artist-input" id="previewArtistInput" placeholder="Исполнитель" />
+      <div class="preview-size" id="previewSize"></div>
     </div>
   </div>
 
@@ -88,6 +92,10 @@
     <div class="trim-error" id="trimError"></div>
     <div class="trim-note">При обрезке аудио перекодируется</div>
   </div>
+
+  <label class="normalize-toggle"><input type="checkbox" id="normalizeToggle" /> Выровнять громкость</label>
+  <div class="normalize-hint">Полезно для подкастов и треков из разных источников</div>
+  <div class="normalize-note" id="normalizeNote" style="display:none">При выравнивании аудио перекодируется</div>
 
   <button class="btn" id="startBtn">Скачать аудио</button>
 
@@ -271,7 +279,7 @@
 }
 </script>
 
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=5"></script>
 <link rel="preconnect" href="https://analytics.audiograb.ru">
 <script defer src="https://analytics.audiograb.ru/script.js" data-website-id="19460776-616d-4b04-888d-509b1d7ebba3"></script>
 </body>

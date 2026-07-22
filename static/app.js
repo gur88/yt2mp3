@@ -20,6 +20,10 @@ const trimStartInput = document.getElementById('trimStart');
 const trimEndInput   = document.getElementById('trimEnd');
 const trimError     = document.getElementById('trimError');
 const trimReset     = document.getElementById('trimReset');
+const pasteBtn      = document.getElementById('pasteBtn');
+const normalizeToggle = document.getElementById('normalizeToggle');
+const normalizeNote   = document.getElementById('normalizeNote');
+const previewSizeEl   = document.getElementById('previewSize');
 
 let selectedFmt     = 'aac';
 let selectedQuality = 192;
@@ -46,12 +50,22 @@ trimToggle.addEventListener('click', () => {
   const expanding = trimSection.style.display === 'none';
   trimSection.style.display = expanding ? 'block' : 'none';
   trimToggle.classList.toggle('expanded', expanding);
+  updateSizeEstimate();
 });
 
 trimReset.addEventListener('click', () => {
   trimStartInput.value = '';
   trimEndInput.value = currentDuration ? formatSecondsAsTime(currentDuration) : '';
   trimError.textContent = '';
+  updateSizeEstimate();
+});
+
+trimStartInput.addEventListener('input', updateSizeEstimate);
+trimEndInput.addEventListener('input', updateSizeEstimate);
+
+normalizeToggle.addEventListener('change', () => {
+  normalizeNote.style.display = normalizeToggle.checked ? 'block' : 'none';
+  updateSizeEstimate();
 });
 
 function parseTimeToSeconds(str) {
@@ -71,6 +85,48 @@ function formatSecondsAsTime(totalSeconds) {
   return h > 0
     ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Read-only version of the trim range, for the size estimate. Deliberately
+// doesn't reuse validateTrim() — that function writes error text as a side
+// effect, and recalculating the estimate on every quality/format click
+// shouldn't silently clear an error the user hasn't fixed yet. Anything
+// unparseable/invalid here just falls back to the full track duration
+// instead of surfacing an error — this is an estimate, not a submission.
+function getEffectiveDuration() {
+  if (!currentDuration) return null;
+  if (trimSection.style.display === 'none') return currentDuration;
+
+  const startRaw = trimStartInput.value.trim();
+  const endRaw   = trimEndInput.value.trim();
+  if (!startRaw && !endRaw) return currentDuration;
+
+  const start = startRaw ? parseTimeToSeconds(startRaw) : null;
+  const end   = endRaw ? parseTimeToSeconds(endRaw) : null;
+  if (Number.isNaN(start) || Number.isNaN(end)) return currentDuration;
+
+  const s = start ?? 0;
+  const e = end ?? currentDuration;
+  return e > s ? e - s : currentDuration;
+}
+
+const FORMAT_BITRATES_KBPS = { aac: 192, opus: 160 }; // mp3 uses selectedQuality — it's user-adjustable
+
+// Recalculated on: format change, mp3 quality change, trim range edits,
+// and the normalize toggle (normalize doesn't change the bitrate, but the
+// hook needs to not break when wired to it). Always prefixed with ≈ — for
+// stream-copy cases the real source bitrate differs from our target and we
+// don't know it in advance, so an honest approximation beats a confident
+// wrong number.
+function updateSizeEstimate() {
+  if (!currentDuration) {
+    previewSizeEl.textContent = '';
+    return;
+  }
+  const bitrateKbps = selectedFmt === 'mp3' ? selectedQuality : FORMAT_BITRATES_KBPS[selectedFmt];
+  const duration = getEffectiveDuration();
+  const megabytes = (duration * bitrateKbps * 1000 / 8) / 1_000_000;
+  previewSizeEl.textContent = `≈ ${megabytes.toFixed(1).replace('.', ',')} МБ`;
 }
 
 // Validates the trim inputs before submit. Returns { active:false } when
@@ -115,6 +171,7 @@ function hidePreview() {
   previewThumb.src = '';
   currentTrackUrl = null;
   currentDuration = null;
+  updateSizeEstimate();
 }
 
 async function fetchPreview(url) {
@@ -147,6 +204,7 @@ async function fetchPreview(url) {
     if (currentDuration && !trimEndInput.value.trim()) {
       trimEndInput.value = formatSecondsAsTime(currentDuration);
     }
+    updateSizeEstimate();
   } catch {
     if (requestId === previewRequestId) hidePreview();
   }
@@ -159,12 +217,19 @@ urlInput.addEventListener('input', () => {
   previewTimer = setTimeout(() => fetchPreview(url), 600);
 });
 
+// Shared entry point for anything that sets the URL programmatically
+// (share-target handoff, the paste button) instead of the user typing —
+// reuses the exact same debounce->fetchPreview path as manual input via a
+// synthetic 'input' event, rather than each caller duplicating that logic.
+function setUrlAndPreview(url) {
+  urlInput.value = url;
+  urlInput.dispatchEvent(new Event('input'));
+}
+
 // Incoming Web Share Target (Android): the OS share sheet lands here as
 // /?title=...&text=...&url=... — Android apps are inconsistent about which
 // param carries the actual link (YouTube commonly uses `text`), so `url` is
-// checked first, then `text`. Reuses the exact same input->preview path as
-// manual typing via a synthetic 'input' event, instead of duplicating the
-// debounce/fetch logic here.
+// checked first, then `text`.
 (function handleIncomingShare() {
   const params = new URLSearchParams(location.search);
   const urlMatch = /https?:\/\/\S+/;
@@ -172,10 +237,27 @@ urlInput.addEventListener('input', () => {
              || (params.get('text') || '').match(urlMatch);
   if (!found) return;
 
-  urlInput.value = found[0];
-  urlInput.dispatchEvent(new Event('input'));
+  setUrlAndPreview(found[0]);
   history.replaceState(null, '', location.pathname);
 })();
+
+// Paste button — feature-detected, never a dead control: only shown when
+// the Clipboard Read API is actually available (missing in Firefox desktop,
+// some WebViews).
+if (navigator.clipboard && navigator.clipboard.readText) {
+  pasteBtn.style.display = '';
+  pasteBtn.addEventListener('click', async () => {
+    let text;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return; // permission denied or unavailable — silent no-op, no alert
+    }
+    const url = (text || '').trim();
+    if (!url) return;
+    setUrlAndPreview(url);
+  });
+}
 
 function stopPolling() {
   pollStopped = true;
@@ -189,16 +271,26 @@ const fmtNotes = {
   opus: { text: '✓ Без перекодирования — наилучшее сжатие при том же качестве', cls: 'good' },
 };
 
+const VALID_FORMATS = ['mp3', 'aac', 'opus'];
+
+// Shared by the click handler and the format-memory restore on load, so
+// both paths apply exactly the same UI state (active button, note, quality
+// section visibility, size-estimate recalc) instead of two copies drifting.
+function selectFormat(fmt) {
+  formatRow.querySelectorAll('.fmt-btn').forEach(b => b.classList.toggle('active', b.dataset.fmt === fmt));
+  selectedFmt = fmt;
+  const n = fmtNotes[fmt];
+  fmtNote.textContent = n.text;
+  fmtNote.className = 'fmt-note' + (n.cls ? ' ' + n.cls : '');
+  qualitySection.style.display = fmt === 'mp3' ? 'block' : 'none';
+  localStorage.setItem('preferredFormat', fmt);
+  updateSizeEstimate();
+}
+
 formatRow.addEventListener('click', e => {
   const btn = e.target.closest('.fmt-btn');
   if (!btn) return;
-  formatRow.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  selectedFmt = btn.dataset.fmt;
-  const n = fmtNotes[selectedFmt];
-  fmtNote.textContent = n.text;
-  fmtNote.className = 'fmt-note' + (n.cls ? ' ' + n.cls : '');
-  qualitySection.style.display = selectedFmt === 'mp3' ? 'block' : 'none';
+  selectFormat(btn.dataset.fmt);
 });
 
 qualityRow.addEventListener('click', e => {
@@ -207,7 +299,17 @@ qualityRow.addEventListener('click', e => {
   qualityRow.querySelectorAll('.q-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   selectedQuality = parseInt(btn.dataset.q);
+  updateSizeEstimate();
 });
+
+// Restore the format preference before any other UI wiring runs, so the
+// size estimate initializes against the right bitrate from the start.
+// An unrecognized/corrupt stored value falls back to the current default
+// (AAC) rather than crashing or leaving the UI in a half-set state.
+const storedFormat = localStorage.getItem('preferredFormat');
+if (storedFormat && VALID_FORMATS.includes(storedFormat)) {
+  selectFormat(storedFormat);
+}
 
 function setStage(stage, pct, sub) {
   const labels = {
@@ -297,6 +399,7 @@ startBtn.addEventListener('click', async () => {
   const artistVal = previewArtistInput.value.trim();
   if (titleVal) payload.title = titleVal;
   if (artistVal) payload.artist = artistVal;
+  if (normalizeToggle.checked) payload.normalize = true;
 
   let jobId;
   try {

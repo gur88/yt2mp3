@@ -25,7 +25,7 @@
   <meta name="twitter:title" content="Скачать аудио с YouTube в MP3, AAC, Opus — AudioGrab" />
   <meta name="twitter:description" content="Извлеките звук из любого видео YouTube и скачайте песню без видео — в MP3, AAC или Opus. Быстро и бесплатно." />
   <meta name="twitter:image" content="https://audiograb.ru/og-image.png" />
-  <link rel="stylesheet" href="/app.css?v=3" />
+  <link rel="stylesheet" href="/app.css?v=4" />
 </head>
 <body>
 <div class="card">
@@ -44,13 +44,17 @@
   </div>
 
   <label>Ссылка на видео или трек</label>
-  <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." />
+  <div class="url-row">
+    <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." />
+    <button type="button" class="paste-btn" id="pasteBtn" style="display:none">Вставить</button>
+  </div>
 
   <div class="preview-box" id="previewBox">
     <img class="preview-thumb" id="previewThumb" alt="" />
     <div class="preview-meta">
       <input type="text" class="preview-title-input" id="previewTitleInput" placeholder="Название" />
       <input type="text" class="preview-artist-input" id="previewArtistInput" placeholder="Исполнитель" />
+      <div class="preview-size" id="previewSize"></div>
     </div>
   </div>
 
@@ -88,6 +92,10 @@
     <div class="trim-error" id="trimError"></div>
     <div class="trim-note">При обрезке аудио перекодируется</div>
   </div>
+
+  <label class="normalize-toggle"><input type="checkbox" id="normalizeToggle" /> Выровнять громкость</label>
+  <div class="normalize-hint">Полезно для подкастов и треков из разных источников</div>
+  <div class="normalize-note" id="normalizeNote" style="display:none">При выравнивании аудио перекодируется</div>
 
   <button class="btn" id="startBtn">Скачать аудио</button>
 
@@ -224,6 +232,15 @@
       «Поделиться» — без копирования вручную.
     </p></div>
   </details>
+
+  <details class="faq-item">
+    <summary>Можно ли выровнять громкость?</summary>
+    <div class="faq-content"><p class="faq-answer">
+      Да — включите переключатель «Выровнять громкость» под блоком обрезки. Это полезно для
+      подкастов, аудиокниг или треков из разных источников, где исходная громкость сильно
+      отличается — сервис выровняет её до стандартного уровня перед сохранением.
+    </p></div>
+  </details>
 </section>
 
 <nav class="source-links">
@@ -338,6 +355,14 @@
         "@type": "Answer",
         "text": "Да — Chrome на Android и на компьютере предложит установить сайт как приложение (или сделайте это вручную через меню браузера → «Установить приложение»). На Android это даёт удобный бонус: ссылку на видео можно отправить в AudioGrab прямо из приложения YouTube или TikTok через кнопку «Поделиться» — без копирования вручную."
       }
+    },
+    {
+      "@type": "Question",
+      "name": "Можно ли выровнять громкость?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Да — включите переключатель «Выровнять громкость» под блоком обрезки. Это полезно для подкастов, аудиокниг или треков из разных источников, где исходная громкость сильно отличается — сервис выровняет её до стандартного уровня перед сохранением."
+      }
     }
   ]
 }
@@ -359,7 +384,7 @@
 }
 </script>
 
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=5"></script>
 <script defer src="https://analytics.audiograb.ru/script.js" data-website-id="19460776-616d-4b04-888d-509b1d7ebba3"></script>
 </body>
 </html>
