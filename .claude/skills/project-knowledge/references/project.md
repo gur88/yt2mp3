@@ -22,7 +22,10 @@ Avoids downloading full video files when only the audio track is needed.
 - Embedded cover art: the video's thumbnail is muxed into the output file as attached-picture cover art (mp3/aac only — Opus's muxer doesn't support it, falls back to no cover), so it shows up in players like Яндекс Музыка (Important)
 - Downloaded file is served once and then deleted from the server (Critical — no persistent storage of user files)
 - Per-IP rate limiting: max 3 concurrent downloads, max 10/hour (Critical for public deployment)
-- SEO landing content: intro copy + FAQ accordion (7 Q&As) below the main tool, with FAQPage JSON-LD structured data for rich snippets (Important — organic search is the main acquisition channel for audiograb.ru)
+- SEO landing content: intro copy + FAQ accordion below the main tool, grown one entry per user-facing feature, with FAQPage JSON-LD structured data for rich snippets (Important — organic search is the main acquisition channel for audiograb.ru)
+- Trim a fragment and/or normalize loudness (-16 LUFS) before download — both force ffmpeg to re-encode instead of stream-copy (Important)
+- Editable title/artist tags, embedded via ffmpeg metadata before download (Important)
+- Installable PWA with an Android Web Share Target — YouTube/TikTok/SoundCloud/VK's native "Поделиться" hands a link straight into the tool instead of copy-paste (Important — the main mobile-friction fix)
 
 ## Scope Boundaries
 

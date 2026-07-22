@@ -9,7 +9,7 @@
 
 ## Testing
 
-No automated tests yet.
+No automated test suite. The working manual-verification pattern for ffmpeg-related changes (trim, normalize, tags, cover art): import `app.py` directly in a throwaway script and call its internal functions (`run_ffmpeg_with_progress`, `ffmpeg_codec_args`, etc.) against a synthetic source generated with `ffmpeg -f lavfi -i "sine=..."` — this exercises the real ffmpeg subprocess plumbing without touching yt-dlp or the network at all, which matters because real YouTube/TikTok/etc. requests from a datacenter IP are unreliable in a sandboxed dev environment (anti-bot blocks, or simply a dead test video ID — see `deployment.md` → Smoke-Test Reference Links for that distinction). Verify with `ffprobe`/`ffmpeg -af ebur128` (duration, codec, sample rate, loudness). Follow up with at least one real end-to-end run through the actual HTTP API before calling a feature done — the direct-function test doesn't exercise the Flask route, job-polling, or yt-dlp's own extraction quirks.
 
 ## Business Rules
 

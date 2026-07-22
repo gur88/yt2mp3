@@ -11,18 +11,22 @@
 
 ```
 yt2mp3/
-├── app.py              # Flask app: routes, download/convert job logic
+├── app.py                    # Flask app: routes, download/convert job logic
 ├── static/
-│   ├── index.html      # main tool page (YouTube-focused)
-│   ├── tiktok.html      # /tiktok — same tool, TikTok-focused SEO content
-│   ├── soundcloud.html  # /soundcloud — same tool, SoundCloud-focused SEO content
-│   ├── vk.html           # /vk — same tool, VK Video-focused SEO content
-│   ├── app.css          # shared styling for the four tool pages above
-│   ├── app.js            # shared tool logic for the four tool pages above
-│   ├── privacy.html     # /privacy — legal, noindex
-│   ├── terms.html       # /terms — legal, noindex
-│   └── 404.html         # error page, noindex
-├── downloads/          # scratch dir for in-flight jobs; files deleted after serving
+│   ├── index.html            # main tool page (YouTube-focused)
+│   ├── tiktok.html            # /tiktok — same tool, TikTok-focused SEO content
+│   ├── soundcloud.html        # /soundcloud — same tool, SoundCloud-focused SEO content
+│   ├── vk.html                 # /vk — same tool, VK Video-focused SEO content
+│   ├── app.css                # shared styling for the four tool pages above
+│   ├── app.js                  # shared tool logic for the four tool pages above
+│   ├── privacy.html           # /privacy — legal, noindex
+│   ├── terms.html             # /terms — legal, noindex
+│   ├── 404.html               # error page, noindex
+│   ├── manifest.webmanifest   # PWA manifest — see PWA section below
+│   ├── sw.js                  # service worker — see PWA section below
+│   ├── offline.html           # SW's offline fallback page
+│   └── icon-*.png             # PWA icons (192, 512, 512-maskable)
+├── downloads/                # scratch dir for in-flight jobs; files deleted after serving
 └── README.md
 ```
 
@@ -75,7 +79,7 @@ The stream-copy paths above are disabled whenever a trim or loudness normalizati
 
 `POST /api/download` accepts optional `trim_start`/`trim_end` (float seconds). Server validates both are non-negative and `start < end` when both are given — checked right after `validate_url`, before `check_rate_limit` (same ordering rationale: an invalid request shouldn't burn quota). Duration-based validation (`end` ≤ track length) is client-side only — the server doesn't know the track's duration until yt-dlp extracts it inside `run_download`, well after the request already returned a job id.
 
-**Forced re-encode.** Whenever a trim is requested, stream-copy is disabled for aac/opus (`ffmpeg_codec_args(..., trimming=True)`) — `-ss`/`-to` with `-c copy` cuts on packet boundaries and can produce leading garbage/silence; an accurate cut needs decoding.
+**Forced re-encode.** Whenever a trim is requested, stream-copy is disabled for aac/opus (`ffmpeg_codec_args(..., force_reencode=True)` — see Loudness Normalization below for why this parameter isn't named `trimming`) — `-ss`/`-to` with `-c copy` cuts on packet boundaries and can produce leading garbage/silence; an accurate cut needs decoding.
 
 **ffmpeg invocation.** `-ss <start>`/`-to <end>` are added as INPUT options, placed before the audio `-i` in `_build_ffmpeg_cmd`. The cover-art thumbnail is a *second*, later `-i` with no trim flags of its own, so the trim only ever applies to the audio input.
 
@@ -150,7 +154,7 @@ During conversion, `run_download` fetches `info["thumbnail"]` (already available
 
 ## SEO Content & FAQ Accordion
 
-Below the tool card, `static/index.html` has a static SEO content section (intro copy + 7-question FAQ) with matching `FAQPage` JSON-LD for search rich snippets. Targets audiograb.ru's core search terms (download audio from YouTube, YouTube to MP3/AAC, extract sound from video).
+Below the tool card, `static/index.html` has a static SEO content section (intro copy + FAQ accordion, grown incrementally as features ship — each new user-facing feature adds one matching FAQ entry) with matching `FAQPage` JSON-LD for search rich snippets. Targets audiograb.ru's core search terms (download audio from YouTube, YouTube to MP3/AAC, extract sound from video).
 
 FAQ items are native `<details>`/`<summary>`, but with custom JS instead of default browser behavior, for two reasons: only one item open at a time, and an animated open/close instead of the instant native toggle.
 
