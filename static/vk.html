@@ -279,7 +279,19 @@
 </script>
 
 <script src="/app.js?v=7"></script>
-<link rel="preconnect" href="https://analytics.audiograb.ru">
-<script defer src="https://analytics.audiograb.ru/script.js" data-website-id="19460776-616d-4b04-888d-509b1d7ebba3"></script>
+<script>
+  if (location.hostname === 'audiograb.ru' || location.hostname === 'www.audiograb.ru') {
+    var link = document.createElement('link');
+    link.rel = 'preconnect';
+    link.href = 'https://analytics.audiograb.ru';
+    document.head.appendChild(link);
+
+    var s = document.createElement('script');
+    s.defer = true;
+    s.src = 'https://analytics.audiograb.ru/script.js';
+    s.setAttribute('data-website-id', '19460776-616d-4b04-888d-509b1d7ebba3');
+    document.head.appendChild(s);
+  }
+</script>
 </body>
 </html>
