@@ -4,12 +4,13 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file, send_from_directory, after_this_request
+from flask import Flask, jsonify, request, send_file, send_from_directory, after_this_request, Response
 import yt_dlp
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -33,6 +34,29 @@ concurrent_counts: dict[str, int] = {}       # ip -> number of downloads current
 INFO_CACHE_TTL  = 600  # seconds
 info_cache_lock = threading.Lock()
 info_cache: dict[str, dict] = {}   # url -> {"data": {...}, "ts": float}
+
+# --- /api/thumbnail rate limiting (separate bucket from download rate limiting:
+# a thumbnail fetch is a single cheap proxied request, not an ffmpeg job, so it
+# shouldn't share budget with — or let scraping crowd out — real downloads) ---
+THUMB_RATE_LIMIT_WINDOW   = 3600  # seconds
+THUMB_RATE_LIMIT_PER_HOUR = 30
+thumb_rate_lock = threading.Lock()
+thumb_request_times: dict[str, list[float]] = {}   # ip -> timestamps of thumbnail fetches in the window
+
+
+def check_thumb_rate_limit(ip: str) -> str | None:
+    """Return a Russian error message if ip is over the hourly thumbnail-fetch
+    limit, else None. Reserves a slot (appends the timestamp) on success."""
+    now = time.monotonic()
+    with thumb_rate_lock:
+        times = [t for t in thumb_request_times.get(ip, []) if now - t < THUMB_RATE_LIMIT_WINDOW]
+        if len(times) >= THUMB_RATE_LIMIT_PER_HOUR:
+            thumb_request_times[ip] = times
+            return (f"Превышен лимит {THUMB_RATE_LIMIT_PER_HOUR} запросов обложек в час "
+                     f"с одного IP. Попробуйте позже.")
+        times.append(now)
+        thumb_request_times[ip] = times
+        return None
 
 
 def get_client_ip() -> str:
@@ -156,6 +180,15 @@ def _janitor() -> None:
         except Exception as e:
             logger.warning("Janitor: request_times cleanup failed: %s", e)
 
+        try:
+            with thumb_rate_lock:
+                stale_ips = [ip for ip, times in thumb_request_times.items()
+                             if not [t for t in times if now - t < THUMB_RATE_LIMIT_WINDOW]]
+                for ip in stale_ips:
+                    del thumb_request_times[ip]
+        except Exception as e:
+            logger.warning("Janitor: thumb_request_times cleanup failed: %s", e)
+
 
 threading.Thread(target=_janitor, daemon=True).start()
 
@@ -174,6 +207,14 @@ FMT_SELECTORS = {
 # Guards against a near-empty/corrupt output (e.g. trim_start past the
 # track's actual end producing a near-zero-length file from ffmpeg).
 MIN_OUTPUT_BYTES = 2048
+
+# --- /api/thumbnail: server builds the i.ytimg.com URL itself from these two
+# validated parts, no user-supplied URL is ever fetched — SSRF-proof by
+# construction, no validate_url call needed here.
+VIDEO_ID_RE      = re.compile(r'^[A-Za-z0-9_-]{11}$')
+THUMB_QUALITIES  = {"maxresdefault", "sddefault", "hqdefault", "mqdefault"}
+THUMB_FETCH_TIMEOUT = 5      # seconds
+MAX_THUMB_BYTES     = 5 * 1024 * 1024
 
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
@@ -456,6 +497,11 @@ def vk():
     return app.send_static_file("vk.html")
 
 
+@app.route("/thumbnail")
+def thumbnail_page():
+    return app.send_static_file("thumbnail.html")
+
+
 @app.route("/manifest.webmanifest")
 def manifest():
     return send_from_directory(app.static_folder, "manifest.webmanifest",
@@ -580,6 +626,45 @@ def start_download():
     ).start()
 
     return jsonify({"job_id": job_id})
+
+
+@app.route("/api/thumbnail")
+def get_thumbnail():
+    video_id = request.args.get("video_id", "")
+    quality  = request.args.get("quality", "")
+
+    if not VIDEO_ID_RE.match(video_id) or quality not in THUMB_QUALITIES:
+        return jsonify({"error": "Некорректные параметры запроса."}), 400
+
+    ip = get_client_ip()
+    limit_error = check_thumb_rate_limit(ip)
+    if limit_error:
+        return jsonify({"error": limit_error}), 429
+
+    # Server builds this URL itself from the two validated parts above — no
+    # user-supplied URL is ever fetched, so this endpoint can't be turned
+    # into a generic proxy.
+    thumb_url = f"https://i.ytimg.com/vi/{video_id}/{quality}.jpg"
+    try:
+        with urllib.request.urlopen(thumb_url, timeout=THUMB_FETCH_TIMEOUT) as resp:
+            data = resp.read(MAX_THUMB_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return jsonify({"error": "Обложка такого качества не найдена."}), 404
+        logger.warning("Thumbnail fetch HTTP error for %s/%s: %s", video_id, quality, e)
+        return jsonify({"error": "Не удалось получить обложку. Попробуйте позже."}), 502
+    except (urllib.error.URLError, OSError) as e:
+        logger.warning("Thumbnail fetch failed for %s/%s: %s", video_id, quality, e)
+        return jsonify({"error": "Не удалось получить обложку. Попробуйте позже."}), 502
+
+    if len(data) > MAX_THUMB_BYTES:
+        return jsonify({"error": "Файл обложки слишком большой."}), 502
+
+    response = Response(data, mimetype="image/jpeg")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="youtube-thumbnail-{video_id}-{quality}.jpg"'
+    )
+    return response
 
 
 @app.route("/api/status/<job_id>")

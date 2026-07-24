@@ -6,6 +6,7 @@ const pctDisplay   = document.getElementById('pctDisplay');
 const progressFill = document.getElementById('progressFill');
 const statusSub    = document.getElementById('statusSub');
 const downloadBtn  = document.getElementById('downloadBtn');
+const shareBtn     = document.getElementById('shareBtn');
 const formatRow    = document.getElementById('formatRow');
 const fmtNote      = document.getElementById('fmtNote');
 const qualitySection = document.getElementById('qualitySection');
@@ -34,6 +35,44 @@ let previewTimer    = null;
 let previewRequestId = 0;
 let currentTrackUrl = null; // URL the trim fields currently belong to
 let currentDuration  = null;
+
+// /api/file is one-shot (server deletes the file and job entry after serving),
+// so "Скачать файл" and "Поделиться" can't each hit it independently — whichever
+// comes second would 404. Both buttons call getFileBlob(), which fetches the
+// file exactly once per job and hands both callers the same resolved Blob.
+let fileFetchPromise = null;
+
+// Mirrors app.py's FORMATS dict (ext/mime per format) — needed client-side
+// because the Blob path builds the download filename and the shared File
+// object itself, instead of letting the server dictate them via a navigation
+// response. Keep in sync if a format is ever added on the backend.
+const FORMAT_EXT  = { mp3: 'mp3', aac: 'm4a', opus: 'opus' };
+const FORMAT_MIME = { mp3: 'audio/mpeg', aac: 'audio/mp4', opus: 'audio/ogg' };
+
+function getFileBlob(jobId) {
+  if (!fileFetchPromise) {
+    fileFetchPromise = fetch(`/api/file/${jobId}`)
+      .then(res => {
+        if (!res.ok) throw new Error('file fetch failed');
+        return res.blob();
+      })
+      .catch(err => {
+        fileFetchPromise = null; // allow a retry on the next click
+        throw err;
+      });
+  }
+  return fileFetchPromise;
+}
+
+// Feature-detected once at load — desktop browsers mostly fail this, so the
+// button simply never becomes visible there, no dead control on screen.
+let shareSupported = false;
+try {
+  const probeFile = new File(['x'], 'probe.mp3', { type: 'audio/mpeg' });
+  shareSupported = !!(navigator.canShare && navigator.canShare({ files: [probeFile] }));
+} catch {
+  shareSupported = false;
+}
 
 // Normalizes a URL to a coarse source label for analytics — domain-level
 // only, never the full URL or video ID (see privacy.html / architecture.md).
@@ -407,6 +446,9 @@ function reset() {
   progressFill.style.background = '';
   statusSub.classList.remove('error');
   downloadBtn.classList.remove('visible');
+  downloadBtn.disabled = false;
+  shareBtn.classList.remove('visible');
+  fileFetchPromise = null; // drop the Blob reference so a large file isn't held in memory after moving on
 }
 
 startBtn.addEventListener('click', async () => {
@@ -485,14 +527,54 @@ startBtn.addEventListener('click', async () => {
       const extLabel = { mp3: 'MP3', aac: 'AAC (.m4a)', opus: 'Opus' }[selectedFmt] || selectedFmt.toUpperCase();
       downloadBtn.textContent = `⬇ Скачать ${extLabel}`;
       downloadBtn.classList.add('visible');
-      downloadBtn.onclick = () => {
-        stopPolling();
-        window.location.href = `/api/file/${jobId}`;
+      downloadBtn.onclick = async () => {
+        downloadBtn.disabled = true;
+        let blob;
+        try {
+          blob = await getFileBlob(jobId);
+        } catch {
+          downloadBtn.disabled = false;
+          setError('Не удалось получить файл. Попробуйте ещё раз.');
+          return;
+        }
+        const filename = `${job.title}.${FORMAT_EXT[payload.format] || payload.format}`;
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
         setTimeout(() => {
+          URL.revokeObjectURL(objectUrl);
           reset();
           statusBox.classList.remove('visible');
         }, 2000);
       };
+
+      if (shareSupported) {
+        shareBtn.classList.add('visible');
+        shareBtn.onclick = async () => {
+          let blob;
+          try {
+            blob = await getFileBlob(jobId);
+          } catch {
+            setError('Не удалось получить файл. Попробуйте ещё раз.');
+            return;
+          }
+          const filename = `${job.title}.${FORMAT_EXT[payload.format] || payload.format}`;
+          const mime = FORMAT_MIME[payload.format] || 'application/octet-stream';
+          const file = new File([blob], filename, { type: mime });
+          try {
+            await navigator.share({ files: [file] });
+            trackEvent('share_used', { source: getSourceLabel(url) });
+          } catch (err) {
+            // AbortError (user cancelled) and any other share failure are both
+            // silent no-ops — matches the app's existing rejection-handling
+            // tone (fetchPreview, pasteBtn).
+          }
+        };
+      }
       startBtn.disabled = false;
 
     } else if (job.status === 'error') {
