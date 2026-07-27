@@ -364,6 +364,14 @@ def run_ffmpeg_with_progress(job_id: str, input_path: Path, output_path: Path,
     return attempt(with_cover=False)
 
 
+class UserFacingError(Exception):
+    """Raised only for a deliberate, already-Russian, ready-to-show message —
+    never as a wrapper around another exception. run_download catches this
+    separately so a known business-rule rejection (playlist link, corrupt
+    trim output) isn't swallowed by the generic fallback meant for
+    unexplained crashes (yt-dlp/ffmpeg internals)."""
+
+
 def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
                   trim_start: float | None = None, trim_end: float | None = None,
                   custom_title: str | None = None, custom_artist: str | None = None,
@@ -399,7 +407,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
-            raise ValueError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
+            raise UserFacingError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info          = ydl.extract_info(url, download=True)
@@ -454,7 +462,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         # ffmpeg can happily "succeed" on while producing a near-empty file.
         if not output_path.exists() or output_path.stat().st_size < MIN_OUTPUT_BYTES:
             output_path.unlink(missing_ok=True)
-            raise RuntimeError("Не удалось обработать фрагмент. Проверьте параметры обрезки.")
+            raise UserFacingError("Не удалось обработать фрагмент. Проверьте параметры обрезки.")
 
         jobs[job_id].update({
             "status":   "done",
@@ -463,10 +471,13 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
             "percent":  100.0,
         })
 
+    except UserFacingError as e:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"]  = str(e)
     except Exception as e:
         logger.exception(e)
         jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"]  = str(e)
+        jobs[job_id]["error"]  = "Не удалось обработать это видео. Попробуйте другое или другую ссылку."
     finally:
         if thumb_path:
             thumb_path.unlink(missing_ok=True)
