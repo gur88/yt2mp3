@@ -5,11 +5,12 @@
 Custom VPS. Local dev run:
 
 ```bash
-pip install yt-dlp flask
-python app.py
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt   # Windows: .venv\Scripts\pip install -r requirements.txt
+.venv/bin/python app.py                     # Windows: .venv\Scripts\python app.py
 ```
 
-Serves on `http://localhost:5000`. Requires `ffmpeg` installed and on PATH (both locally and on the server).
+Serves on `http://localhost:5000`. Requires `ffmpeg` installed and on PATH (both locally and on the server). `.venv/` is gitignored — every clone creates its own, from `requirements.txt`.
 
 ## Environments
 
@@ -18,7 +19,9 @@ Serves on `http://localhost:5000`. Requires `ffmpeg` installed and on PATH (both
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/deploy.yml`) deploys on every push to `master`: SSHes into the server, runs `git pull` in `/var/www/yt2mp3`, then `systemctl restart yt2mp3`. No test/build step — the app has no automated tests yet.
+GitHub Actions (`.github/workflows/deploy.yml`) deploys on every push to `master`: SSHes into the server, runs `git pull` in `/var/www/yt2mp3`, then `venv/bin/pip install -r requirements.txt --quiet`, then `systemctl restart yt2mp3`. No test/build step — the app has no automated tests yet.
+
+The `pip install` step is what makes `requirements.txt` the actual source of truth for what's running — without it, bumping a pin in git would silently do nothing on the server (see Dependency Versioning below). Since every pin is exact, this is a fast no-op on any deploy that didn't touch dependencies; if it ever fails (network blip reaching PyPI, a bad pin), it fails *before* `systemctl restart`, so the old code and old dependencies keep running rather than landing in a half-updated state.
 
 **Required GitHub Actions secrets** (repo Settings → Secrets and variables → Actions):
 
@@ -32,10 +35,40 @@ GitHub Actions (`.github/workflows/deploy.yml`) deploys on every push to `master
 
 ```bash
 ssh root@213.139.208.8
-cd /var/www/yt2mp3 && git pull && systemctl restart yt2mp3
+cd /var/www/yt2mp3 && git pull && venv/bin/pip install -r requirements.txt --quiet && systemctl restart yt2mp3
 ```
 
 **Rollback**: on the server, `git log --oneline` to find the last good commit, then `git reset --hard <commit>` and `systemctl restart yt2mp3`.
+
+## Dependency Versioning
+
+All Python dependencies are pinned exactly in `requirements.txt` (an exact snapshot of what's actually installed, not a range) — `blinker`, `click`, `Flask`, `gunicorn`, `itsdangerous`, `Jinja2`, `MarkupSafe`, `packaging`, `Werkzeug`, `yt-dlp`. Before this, nothing was pinned anywhere: `deploy.yml` only ran `git pull`, so the venv on the server was whatever had been installed manually at some point in the past — confirmed drifted in practice (dev had `yt-dlp==2026.6.9`, prod had `2026.7.4`, same day, no one had touched either deliberately).
+
+**`yt-dlp` specifically is updated reactively, not on a schedule.** Trigger: the Umami per-source `job_error`/`job_done` dashboard shows degradation on a source, or a fresh extractor traceback shows up in `journalctl` (see `patterns.md` → Background Thread Error Handling) — or occasionally, deliberately, when convenient. Never automatic, never calendar-based: an unreviewed nightly extractor regression should never reach prod on its own.
+
+**The other nine packages need the same discipline for a different reason: security.** Pinning them stops `pip install -r requirements.txt` (now run on every deploy) from ever silently pulling in a newer version — which also means it stops silently pulling in a security fix for `Flask`/`Werkzeug`/`gunicorn`/etc. the way an incidental manual `pip install` sometimes used to. Reproducibility traded away the "someone else's upgrade fixes it for free" safety net. When a CVE lands in any pinned package, bump it deliberately the same way as a yt-dlp update — don't wait for a symptom, since these rarely fail loudly the way a broken extractor does.
+
+**Update procedure** (yt-dlp or any other pin):
+1. Locally: `.venv/bin/pip install --upgrade yt-dlp`, note the new version.
+2. Update the `yt-dlp==` line in `requirements.txt`.
+3. Run the regression checklist below against the *local* venv — this only means something because the local venv is pinned to the same baseline as prod (see Local dev run above; before `requirements.txt` existed, a local check could pass against a version prod didn't even have).
+4. Passed → commit (message states old→new version and what triggered it) → push to `master`.
+5. CI/CD installs and restarts automatically — no manual server step.
+6. One quick spot-check against the live site (the smoke-test links below) — prod's IP/network can behave differently than dev's.
+
+**Regression checklist** (~10 minutes, one real preview + download per source, not just a preview):
+
+| # | Source | Action | Check | Time |
+|---|--------|--------|-------|------|
+| 1 | YouTube | paste the YouTube reference link below, download AAC | preview shows title/thumbnail/duration; AAC stream-copies (no re-encode note); cover art embedded | ~2 min |
+| 2 | TikTok | paste the TikTok reference link, download MP3 | preview ok; download completes and plays | ~2 min |
+| 3 | SoundCloud | paste the SoundCloud reference link, download AAC | preview ok; download completes | ~2 min |
+| 4 | VK | paste the VK reference link, download Opus | preview ok; download completes — VK is currently the least stable extractor, don't skip this one | ~2 min |
+| 5 | any source | enable "Обрезать фрагмент", download a short trim | output duration matches the trimmed range — exercises `-ss`/`-to` + forced re-encode, a separate code path from a plain download | ~1–2 min |
+
+**Rollback**: `git revert <the bump commit>` (or hand-edit the pin back), push. CI/CD reinstalls the exact previous version — `pip install pkg==<old>` downgrades cleanly, no special flags needed. `git log -- requirements.txt` is the version history; nothing extra to maintain.
+
+The one discipline this depends on: actually looking at the Umami dashboard occasionally, and treating a CVE announcement for any pinned package the same way as a broken extractor. Reactive only works if someone reacts.
 
 ## Environment Variables
 
@@ -68,11 +101,14 @@ Added 2026-07-22, verified via securityheaders.com (Grade B at the time). No `Co
 
 For manual post-deploy/post-infra checks against prod (not automated, not a test suite — just "does a real download still work"), use a known-good, stable video rather than the first ID that comes to mind. An old or removed video returning "Video unavailable" from yt-dlp looks identical to yt-dlp being blocked by YouTube's anti-bot defenses, and the two got conflated once already (July 2026, during the trim-feature review) before being sorted out as "just a dead test video."
 
-Verified-stable reference:
+Verified-stable references, one per source (used by the Dependency Versioning regression checklist above — pick official/large-account content specifically because it's the least likely to vanish, not because it's more "correct" than any other video):
 
-- `https://www.youtube.com/watch?v=9bZkp7q19f0` (PSY — Gangnam Style; long-running, extremely popular upload, very unlikely to be taken down) — confirmed working 2026-07-21 and 2026-07-22.
+- **YouTube**: `https://www.youtube.com/watch?v=9bZkp7q19f0` (PSY — Gangnam Style; long-running, extremely popular upload, very unlikely to be taken down) — confirmed working 2026-07-21 and 2026-07-22.
+- **TikTok**: `https://www.tiktok.com/@tiktok/video/7666214645006421278` (TikTok's own official account, about the For You Feed — platform's own content, essentially never gets taken down) — confirmed working 2026-07-27.
+- **SoundCloud**: `https://soundcloud.com/marshmellomusic/alone` (Marshmello — Alone, official verified artist account, uploaded 2016, 74M+ plays) — confirmed working 2026-07-27.
+- **VK**: `https://vkvideo.ru/video-18403220_456239696` (Руслан Усачев — large, long-established Russian creator's official public; content is news-commentary so it'll read as dated, but the channel itself is the stable part, not the topic) — confirmed working end-to-end (real download via the live API) 2026-07-27. VK's extractor is currently the least stable of the four (see the `vk.py` subtitle crash noted in `architecture.md` → Data Flow), so don't skip this one when regression-testing.
 
-Keep at least this one link here and re-verify it occasionally; add a second (e.g. a short video) once you've actually confirmed it's stable — don't add an unverified one just to have two, that defeats the point.
+Re-verify these occasionally (they're what "10-minute regression checklist" assumes exist) — replace one only after confirming its replacement is actually stable, don't swap in an unverified link just to keep the list fresh.
 
 ## Analytics (Umami)
 

@@ -10,11 +10,12 @@
 ## Установка и запуск
 
 ```bash
-# 1. Установить зависимости
-pip install yt-dlp flask
+# 1. Создать виртуальное окружение и установить зависимости
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt   # Windows: .venv\Scripts\pip install -r requirements.txt
 
 # 2. Запустить сервер
-python app.py
+.venv/bin/python app.py                     # Windows: .venv\Scripts\python app.py
 
 # 3. Открыть в браузере
 http://localhost:5000
