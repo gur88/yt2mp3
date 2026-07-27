@@ -14,8 +14,37 @@ Serves on `http://localhost:5000`. Requires `ffmpeg` installed and on PATH (both
 
 ## Environments
 
-- **Production**: VPS `213.139.208.8`, app at `/var/www/yt2mp3`, run as a `systemd` service named `yt2mp3` via `gunicorn --workers 1 --bind 127.0.0.1:5000 app:app` (single worker is load-bearing: all in-memory state — `jobs`, `info_cache`, `request_times` — lives in one process with no cross-process sharing; adding workers would silently break rate limiting, the info cache, and job status polling)
+- **Production**: VPS `213.139.208.8`, app at `/var/www/yt2mp3`, run as a `systemd` service named `yt2mp3` via `gunicorn --workers 1 --bind 127.0.0.1:5000 --no-control-socket app:app`, as the unprivileged `yt2mp3` system user (see Service User & Hardening below) — single worker is load-bearing: all in-memory state — `jobs`, `info_cache`, `request_times` — lives in one process with no cross-process sharing; adding workers would silently break rate limiting, the info cache, and job status polling
 - **Local**: developer machine, no staging environment
+
+## Service User & Hardening (added 2026-07-27, "Stage 2")
+
+The service no longer runs as root. Before this, `yt2mp3.service` ran with `User=root` — meaning any RCE-class bug in yt-dlp or ffmpeg (both parse untrusted content from URLs users submit) would hand an attacker the whole server, not a sandboxed account. This was flagged during the 2026-07-27 nginx session ("Stage 1") as the more important open risk and fixed in a dedicated follow-up session ("Stage 2") right after.
+
+**Service user:** `yt2mp3` — a system account, created with `useradd --system --no-create-home --shell /usr/sbin/nologin yt2mp3` (`uid=999`, own same-named group, no supplementary groups, no home directory, no login shell). Recon before the switch confirmed the app has exactly one runtime write path — `downloads/` (`OUTPUT_DIR = Path("downloads")` in `app.py`, resolved via the unit's `WorkingDirectory`) — everything else the process touches (code, `venv/`, `static/`) is already world-readable (`755`/`644`), so the new user needs no special read grants there.
+
+**Ownership:** `/var/www/yt2mp3/downloads` and `/var/www/yt2mp3/__pycache__` are `chown -R yt2mp3:yt2mp3`. Nothing else in the tree was rechowned — code/venv/static deliberately stay root-owned; the service only needs to read them.
+
+**`--no-control-socket` in `ExecStart`, and why it matters:** gunicorn 26.x has a control-socket feature (for the `gunicornc` companion tool) that's on by default, listening at `$XDG_RUNTIME_DIR/gunicorn.ctl` or, if that's unset, `$HOME/.gunicorn/gunicorn.ctl`. Under `User=root` this silently resolved to `/root/.gunicorn/gunicorn.ctl` and worked. The new `yt2mp3` user has `--no-create-home` — its `$HOME` (`/home/yt2mp3` per `getent passwd`) does not exist on disk, and gunicorn's docs don't specify whether a failure to create that control-socket path is a hard start failure or a silent skip. Rather than gamble on undocumented fallback behavior, the control socket — a feature this deployment never uses (no `gunicornc` runtime management anywhere) — is disabled outright with `--no-control-socket`. Verified in the journal: no control-socket line at all after the switch, clean start.
+
+**Full systemd hardening set** (`[Service]` section, in effect since Stage 2):
+```ini
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/yt2mp3/downloads /var/www/yt2mp3/__pycache__
+```
+`ProtectSystem=strict` makes the entire filesystem read-only except the paths listed in `ReadWritePaths` — both paths there are exactly the two directories chowned to `yt2mp3` above; get this pairing wrong and the service starts fine (a 200 on the homepage proves nothing — writes only happen when a job actually runs) but the first real download fails. `PrivateDevices=true` was the one real unknown — verified end-to-end (not assumed) that ffmpeg's audio-only conversion path doesn't need device access: a trim download was run and its output duration checked with `ffprobe` after this was added, both before and after Stage 2's own restart, both times clean.
+
+**Verification performed both after the user switch and again after hardening** (`is-active`/`curl 200` alone were treated as insufficient — they don't exercise the write path at all): a plain download to `status: done` with the output file confirmed `yt2mp3:yt2mp3` on disk, a trim download with `ffprobe` confirming the actual trimmed duration, and a file fetch through `/api/file` confirming delete works too (same `unlink()` code path the janitor's hourly sweep uses, so this doubles as proof the janitor won't silently fail on ownership without waiting an hour to watch it run).
+
+**Critical — `.gitignore` must keep `downloads/` and `__pycache__/` excluded.** Both are already listed there. If either ever gets committed, the next `deploy.yml` run's `git pull` would recreate/reset it as part of the root-owned checkout, silently reverting the Stage-2 `chown` — the de-root would decay on the very next deploy without any error or warning. This is a standing invariant to protect, not a one-time fact.
+
+**Unit backup:** the pre-Stage-2 unit (`User=root`, no hardening) is saved at `/root/backup-systemd-2026-07-27/yt2mp3.service` on the server — rollback is restoring that file, `daemon-reload`, `restart`.
+
+This completes the two-stage 2026-07-27 infra work (nginx canonicalization/headers, then de-rooting the service). The one security item still open afterward is Stage 1's CSP `unsafe-inline` gap (see Security Headers below) — the policy is live in Report-Only mode but provides no real XSS protection until the inline Umami loader and `offline.html`'s `onclick` move to nonces/hashes.
 
 ## CI/CD
 
