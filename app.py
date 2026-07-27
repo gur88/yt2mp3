@@ -464,6 +464,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         })
 
     except Exception as e:
+        logger.exception(e)
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"]  = str(e)
     finally:

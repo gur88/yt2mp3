@@ -18,3 +18,7 @@ None beyond what's in `architecture.md` (format/codec selection table).
 `static/privacy.html` states the exact IP retention period (rate-limit window) in prose. If `RATE_LIMIT_WINDOW` in `app.py` ever changes, update that wording too — it's a duplicated fact, not derived at build time.
 
 `static/app.css`/`static/app.js` are shared by the four tool pages (`index.html`, `tiktok.html`, `soundcloud.html`, `vk.html`) via a manual cache-busting version query (`?v=1`). There's no build step to auto-bust the cache — whenever either file's content changes, bump the version number by hand in every page that references it, or returning visitors' browsers may keep serving the stale cached copy.
+
+## Background Thread Error Handling
+
+Every `except` block in a background thread (currently just `run_download`, spawned per job from `/api/download`) must call `logger.exception(e)` before recording the failure anywhere else. A background thread has no HTTP response to fail loudly with — an unlogged exception there is invisible outside the process, since `job_error` in Umami is client-side telemetry (fires only if the browser is still polling and JS runs), not a substitute for a server-side traceback. This was a real gap: a yt-dlp extractor bug crashed downloads for two real users and left zero trace in `journalctl` until this was fixed (see `architecture.md` → Data Flow).
