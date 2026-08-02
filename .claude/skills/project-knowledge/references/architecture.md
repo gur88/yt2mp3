@@ -266,6 +266,19 @@ In `/api/info` it runs *after* the `info_cache` lookup (cached URLs were already
 
 **Known accepted limitation:** validation resolves DNS once here; yt-dlp resolves again independently later. A DNS-rebinding window exists between the two lookups (attacker's DNS answers public at validation time, private by the time yt-dlp connects). Out of scope for this threat model — not worth pinning the resolved address through to yt-dlp for it.
 
+## Known-Bad-Link Classification (`classify_known_bad_link`)
+
+[classify_known_bad_link()](app.py#L97-L131) catches two specific copy-paste mistakes before yt-dlp ever runs, positioned right after `validate_url` in both `/api/info` and `/api/download` — same synchronous, no-network-call placement, same rationale (don't burn a rate-limit slot or a yt-dlp call on input that can never succeed).
+
+Added 2026-08-02 after a server-log diagnostic on a run of recurring `/vk` page errors: 6/6 `UnsupportedError` failures in a 24h window turned out to be one of two things, and VK's own extractor was never once invoked — the earlier-suspected `vk.py` subtitle bug (see below) wasn't the cause at all.
+
+- **Yandex.Video wrapper links** (`ya.ru/video/preview/...`) — Yandex indexes and embeds VK videos in its own search results; copying a link from there hands the user a `ya.ru` share URL instead of the actual VK one. Detected by exact host + path-prefix match.
+- **Bare VK domain, no video path** (`vk.ru` / `vk.com` / `vkvideo.ru` with an empty or `/` path) — someone copied the homepage/app link instead of an individual video's URL.
+
+Both return a specific Russian message telling the user what to do (open the video on VK directly / open the specific video, not the homepage), instead of the generic "не удалось обработать это видео" fallback. Matching is exact-host-or-subdomain (`m.vk.com` etc. included), the same style as `app.js`'s `getSourceLabel()` — no shared code between them (different language/runtime), just the same matching approach.
+
+**Known gap, not fixed:** `getSourceLabel()` on the frontend (used for Umami's per-source analytics labeling) does not include `vk.ru` in its host list, only `vk.com`/`vkvideo.ru` — found during this work, left as-is since it's a separate, unrelated analytics-labeling concern.
+
 ## HTTP Security Headers
 
 Browser-facing security headers (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, `Strict-Transport-Security`) are set at the nginx layer, not in `app.py` — see `deployment.md` → Security Headers for the exact directives and why `Content-Security-Policy` isn't there yet.
