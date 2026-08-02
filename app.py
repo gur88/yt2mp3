@@ -94,6 +94,45 @@ def validate_url(url: str) -> str | None:
     return None
 
 
+def classify_known_bad_link(url: str) -> str | None:
+    """
+    Return a pointed Russian error for two known-bad-input shapes that
+    aren't VK-extractor bugs but are common copy-paste mistakes landing on
+    the /vk page (confirmed via server-log diagnostic, 2026-08-02: 6/6
+    UnsupportedError failures in a 24h window were one of these two, VK's
+    own extractor was never even invoked). Checked before yt-dlp ever runs
+    — no network call needed, so this is pure string/hostname parsing —
+    same exact-or-subdomain matching style as app.js's getSourceLabel(),
+    though there's no shared code to import across the Python/JS boundary.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return None
+
+    def is_host(base: str) -> bool:
+        return host == base or host.endswith("." + base)
+
+    # Case A: Yandex.Video's own wrapper link for a VK-hosted video, not a
+    # direct VK URL — Yandex indexes/embeds VK videos and hands out this
+    # ya.ru share link when copied from its own search results.
+    if is_host("ya.ru") and parsed.path.startswith("/video/preview/"):
+        return ("Это ссылка с Яндекс.Видео, а не с самого VK — сервис не может её "
+                 "обработать. Откройте видео на vk.ru или vkvideo.ru и скопируйте "
+                 "ссылку оттуда.")
+
+    # Case B: a bare VK domain with no path to a specific video — someone
+    # copied the homepage/app link instead of an individual video's URL.
+    if (is_host("vk.ru") or is_host("vk.com") or is_host("vkvideo.ru")) and parsed.path in ("", "/"):
+        return ("Это ссылка на главную страницу VK, а не на конкретное видео. "
+                 "Откройте нужный ролик и скопируйте ссылку на него.")
+
+    return None
+
+
 def check_rate_limit(ip: str) -> tuple[str, int | None] | None:
     """
     Return (Russian error message, retry_after_seconds) if the IP is over a limit, else None.
@@ -555,6 +594,10 @@ def get_info():
     if validation_error:
         return jsonify({"error": validation_error}), 400
 
+    known_bad_error = classify_known_bad_link(url)
+    if known_bad_error:
+        return jsonify({"error": known_bad_error}), 400
+
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
@@ -594,6 +637,10 @@ def start_download():
     validation_error = validate_url(url)
     if validation_error:
         return jsonify({"error": validation_error}), 400
+
+    known_bad_error = classify_known_bad_link(url)
+    if known_bad_error:
+        return jsonify({"error": known_bad_error}), 400
 
     try:
         trim_start = parse_trim_value(data.get("trim_start"))
