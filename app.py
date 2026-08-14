@@ -10,7 +10,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file, send_from_directory, after_this_request, Response
+from flask import Flask, jsonify, request, send_file, send_from_directory, after_this_request, Response, abort
 import yt_dlp
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -577,8 +577,11 @@ def terms():
     return app.send_static_file("terms.html")
 
 
-@app.route("/api/info", methods=["POST"])
+@app.route("/api/info", methods=["GET", "POST"])
 def get_info():
+    if request.method == "GET":
+        abort(405)
+
     data = request.get_json(force=True)
     url  = (data.get("url") or "").strip()
 
@@ -622,8 +625,11 @@ def get_info():
     return jsonify(result)
 
 
-@app.route("/api/download", methods=["POST"])
+@app.route("/api/download", methods=["GET", "POST"])
 def start_download():
+    if request.method == "GET":
+        abort(405)
+
     data    = request.get_json(force=True)
     url     = (data.get("url") or "").strip()
     fmt     = data.get("format", "aac")
