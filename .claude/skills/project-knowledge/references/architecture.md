@@ -107,6 +107,8 @@ The stream-copy paths above are disabled whenever a trim or loudness normalizati
 
 `POST /api/info {url}` runs `yt_dlp.extract_info(url, download=False)` — metadata only, no file ever touches disk — and returns `{title, artist, thumbnail, duration}` (`artist` falls back through `artist → uploader → channel`, since not every video sets an explicit artist tag). The frontend calls this on a 600ms debounce after the URL input changes (`static/index.html`), guarding against out-of-order responses with a `previewRequestId` counter so a stale response for an old URL can't overwrite the preview for a newer one.
 
+**Loading/error UI (`static/app.js`).** While the request is in flight, a `.preview-loading` spinner is shown; on a JSON `{error}` response or a fetch/network failure, `.preview-error` shows the message (server's Russian text for the former, a fixed "не удалось проверить ссылку" string for the latter) instead of silently hiding the preview box as before — added 2026-08-15 since the prior behavior gave no feedback at all for an invalid link or a slow connection. Both elements are cleared on the next keystroke (`urlInput`'s `input` listener) so a new attempt doesn't show stale state.
+
 Results are cached in-memory for 10 minutes (`info_cache`, keyed by the raw URL string — no normalization, so `youtu.be/X` and `youtube.com/watch?v=X` cache separately). Only successful lookups are cached; errors are never cached, so a transient extraction failure doesn't stick for the full TTL.
 
 ## Programmatic URL Input (`setUrlAndPreview`)
@@ -272,12 +274,18 @@ In `/api/info` it runs *after* the `info_cache` lookup (cached URLs were already
 
 Added 2026-08-02 after a server-log diagnostic on a run of recurring `/vk` page errors: 6/6 `UnsupportedError` failures in a 24h window turned out to be one of two things, and VK's own extractor was never once invoked — the earlier-suspected `vk.py` subtitle bug (see below) wasn't the cause at all.
 
-- **Yandex.Video wrapper links** (`ya.ru/video/preview/...`) — Yandex indexes and embeds VK videos in its own search results; copying a link from there hands the user a `ya.ru` share URL instead of the actual VK one. Detected by exact host + path-prefix match.
+- **Yandex.Video wrapper links** (`/video/preview/...` under `ya.ru` or `yandex.ru`) — Yandex indexes and embeds VK videos in its own search results; copying a link from there hands the user a Yandex share URL instead of the actual VK one. Detected by host + path-prefix match across both of Yandex's domains (originally `ya.ru`-only; `yandex.ru` added 2026-08-16 after the same wrapper link turned up under that domain too).
 - **Bare VK domain, no video path** (`vk.ru` / `vk.com` / `vkvideo.ru` with an empty or `/` path) — someone copied the homepage/app link instead of an individual video's URL.
 
 Both return a specific Russian message telling the user what to do (open the video on VK directly / open the specific video, not the homepage), instead of the generic "не удалось обработать это видео" fallback. Matching is exact-host-or-subdomain (`m.vk.com` etc. included), the same style as `app.js`'s `getSourceLabel()` — no shared code between them (different language/runtime), just the same matching approach.
 
 **Known gap, not fixed:** `getSourceLabel()` on the frontend (used for Umami's per-source analytics labeling) does not include `vk.ru` in its host list, only `vk.com`/`vkvideo.ru` — found during this work, left as-is since it's a separate, unrelated analytics-labeling concern.
+
+## Generic Extraction-Failure Classification (`classify_extraction_error`)
+
+[classify_extraction_error(e, fallback)](app.py#L137-L166) sits one layer below `classify_known_bad_link`: it runs *after* yt-dlp has already failed (in both `get_info`'s and `run_download`'s `except` blocks), and turns yt-dlp's own exception text into a more specific Russian message where the failure has a known, user-relevant cause — unsupported site, unparseable URL, login/geo restriction, or a site markup change yt-dlp's extractor hasn't caught up to yet. Anything that doesn't match falls through to the caller-supplied generic fallback, which differs between the two call sites (pure metadata lookup vs. also covering ffmpeg/filesystem failures) — added 2026-08-16 alongside the `yandex.ru` fix above.
+
+Matches on yt-dlp's own message substrings rather than exception subclasses (`DownloadError`, what actually reaches these blocks, re-wraps the original message as a plain string and doesn't reliably preserve the original exception type). This is a display-text choice only, made after the failure is already in the generic-crash branch and already logged via `logger.exception` — it doesn't affect *whether* something is logged, so it doesn't conflict with `patterns.md`'s warning against using message-text matching to decide expected-vs-crash (see Background Thread Error Handling).
 
 ## HTTP Security Headers
 
