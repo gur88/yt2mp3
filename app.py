@@ -118,8 +118,9 @@ def classify_known_bad_link(url: str) -> str | None:
 
     # Case A: Yandex.Video's own wrapper link for a VK-hosted video, not a
     # direct VK URL — Yandex indexes/embeds VK videos and hands out this
-    # ya.ru share link when copied from its own search results.
-    if is_host("ya.ru") and parsed.path.startswith("/video/preview/"):
+    # share link (under either of Yandex's two domains) when copied from
+    # its own search results.
+    if (is_host("ya.ru") or is_host("yandex.ru")) and parsed.path.startswith("/video/preview/"):
         return ("Это ссылка с Яндекс.Видео, а не с самого VK — сервис не может её "
                  "обработать. Откройте видео на vk.ru или vkvideo.ru и скопируйте "
                  "ссылку оттуда.")
@@ -131,6 +132,38 @@ def classify_known_bad_link(url: str) -> str | None:
                  "Откройте нужный ролик и скопируйте ссылку на него.")
 
     return None
+
+
+def classify_extraction_error(e: Exception, fallback: str) -> str:
+    """
+    Turn a yt-dlp extraction failure (already logged in full via
+    logger.exception by the caller) into a more specific message than the
+    generic fallback — distinguishes causes the user can't fix by
+    re-checking the link (site explicitly unsupported, site markup
+    changed and yt-dlp's extractor hasn't caught up yet, login/geo
+    restriction) from a genuinely unrecognized failure, where the
+    caller's own fallback is still the honest answer. Matches on
+    yt-dlp's own message text rather than exception subclasses, since
+    DownloadError (what actually reaches these except blocks) re-wraps
+    the original message as a plain string and doesn't reliably
+    preserve the original type. `fallback` is caller-supplied because
+    the two call sites cover different failure surfaces (get_info: pure
+    metadata lookup; run_download: also ffmpeg/filesystem failures
+    unrelated to the link itself) and shouldn't share one fallback wording.
+    """
+    msg = str(e)
+    if "is not supported and will not be supported" in msg:
+        return "Этот сайт не поддерживается сервисом."
+    if "Unsupported URL" in msg:
+        return "Такой тип ссылки не поддерживается. Убедитесь, что это прямая ссылка на видео или трек."
+    if "only available for registered users" in msg:
+        return "Видео доступно только авторизованным пользователям на сайте-источнике — сервис не может его скачать."
+    if "not available from your location due to geo restriction" in msg or "not available in your country" in msg:
+        return "Видео недоступно из-за географических ограничений сайта-источника."
+    if "Unable to extract" in msg:
+        return ("Сайт-источник недавно изменил структуру страницы, и наш сервис пока не успел под "
+                 "это подстроиться. Попробуйте ещё раз позже.")
+    return fallback
 
 
 def check_rate_limit(ip: str) -> tuple[str, int | None] | None:
@@ -516,7 +549,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
     except Exception as e:
         logger.exception(e)
         jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"]  = "Не удалось обработать это видео. Попробуйте другое или другую ссылку."
+        jobs[job_id]["error"]  = classify_extraction_error(e, "Не удалось обработать это видео. Попробуйте другое или другую ссылку.")
     finally:
         if thumb_path:
             thumb_path.unlink(missing_ok=True)
@@ -586,7 +619,7 @@ def get_info():
     url  = (data.get("url") or "").strip()
 
     if not url:
-        return jsonify({"error": "URL is required"}), 400
+        return jsonify({"error": "Нужно указать ссылку."}), 400
 
     with info_cache_lock:
         cached = info_cache.get(url)
@@ -611,7 +644,7 @@ def get_info():
             info = ydl.extract_info(url, download=False)
     except Exception as e:
         logger.exception(e)
-        return jsonify({"error": "Не удалось получить информацию о видео. Проверьте ссылку."}), 400
+        return jsonify({"error": classify_extraction_error(e, "Не удалось получить информацию о видео. Проверьте ссылку.")}), 400
 
     result = {
         "title":     info.get("title"),
@@ -636,9 +669,9 @@ def start_download():
     quality = int(data.get("quality", 192))
 
     if not url:
-        return jsonify({"error": "URL is required"}), 400
+        return jsonify({"error": "Нужно указать ссылку."}), 400
     if fmt not in FORMATS:
-        return jsonify({"error": "Unknown format"}), 400
+        return jsonify({"error": "Неизвестный формат."}), 400
 
     validation_error = validate_url(url)
     if validation_error:
