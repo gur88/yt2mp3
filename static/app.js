@@ -15,6 +15,8 @@ const previewBox   = document.getElementById('previewBox');
 const previewThumb = document.getElementById('previewThumb');
 const previewTitleInput  = document.getElementById('previewTitleInput');
 const previewArtistInput = document.getElementById('previewArtistInput');
+const previewLoading = document.getElementById('previewLoading');
+const previewError   = document.getElementById('previewError');
 const trimToggle    = document.getElementById('trimToggle');
 const trimSection   = document.getElementById('trimSection');
 const trimStartInput = document.getElementById('trimStart');
@@ -244,8 +246,21 @@ function hidePreview() {
   updateSizeEstimate();
 }
 
+function hidePreviewError() {
+  previewError.classList.remove('visible');
+  previewError.textContent = '';
+}
+
+function showPreviewError(msg) {
+  hidePreview();
+  previewError.textContent = msg;
+  previewError.classList.add('visible');
+}
+
 async function fetchPreview(url) {
   const requestId = ++previewRequestId;
+  hidePreviewError();
+  previewLoading.classList.add('visible');
   try {
     const res = await fetch('/api/info', {
       method: 'POST',
@@ -254,7 +269,8 @@ async function fetchPreview(url) {
     });
     const data = await res.json();
     if (requestId !== previewRequestId) return; // stale response, URL changed since
-    if (data.error) { trackEvent('preview_error', { source: getSourceLabel(url) }); hidePreview(); return; }
+    previewLoading.classList.remove('visible');
+    if (data.error) { trackEvent('preview_error', { source: getSourceLabel(url) }); showPreviewError(data.error); return; }
 
     if (url !== currentTrackUrl) {
       // Genuinely different track from whatever the trim fields were last
@@ -276,12 +292,17 @@ async function fetchPreview(url) {
     }
     updateSizeEstimate();
   } catch {
-    if (requestId === previewRequestId) hidePreview();
+    if (requestId === previewRequestId) {
+      previewLoading.classList.remove('visible');
+      showPreviewError('Не удалось проверить ссылку. Проверьте соединение и попробуйте снова.');
+    }
   }
 }
 
 urlInput.addEventListener('input', () => {
   clearTimeout(previewTimer);
+  previewLoading.classList.remove('visible');
+  hidePreviewError();
   const url = urlInput.value.trim();
   if (!url) { hidePreview(); return; }
   previewTimer = setTimeout(() => fetchPreview(url), 600);

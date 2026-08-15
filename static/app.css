@@ -238,6 +238,34 @@ input[type="text"]::placeholder { color: var(--muted); }
   margin-bottom: 20px;
 }
 .preview-box.visible { display: flex; }
+
+.preview-loading {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.preview-loading.visible { display: flex; }
+.preview-loading .spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.preview-error {
+  display: none;
+  color: #ff6b6b;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.preview-error.visible { display: block; }
 .preview-thumb {
   width: 64px;
   height: 64px;
