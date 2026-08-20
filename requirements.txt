@@ -7,4 +7,4 @@ Jinja2==3.1.6
 MarkupSafe==3.0.3
 packaging==26.2
 Werkzeug==3.1.8
-yt-dlp==2026.7.4
+yt-dlp==2026.8.19
