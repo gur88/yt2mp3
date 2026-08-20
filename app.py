@@ -163,6 +163,8 @@ def classify_extraction_error(e: Exception, fallback: str) -> str:
     if "Unable to extract" in msg:
         return ("Сайт-источник недавно изменил структуру страницы, и наш сервис пока не успел под "
                  "это подстроиться. Попробуйте ещё раз позже.")
+    if "Temporary failure in name resolution" in msg:
+        return "Временная проблема с сетью на сервере. Попробуйте ещё раз через минуту."
     return fallback
 
 

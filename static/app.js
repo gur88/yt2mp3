@@ -534,6 +534,19 @@ startBtn.addEventListener('click', async () => {
     }
 
     if (pollStopped) return;
+
+    if (!res.ok) {
+      // Job vanished server-side (restart/deploy mid-download, or evicted
+      // after sitting too long) — without this check job.status is
+      // undefined and falls through to the 'pending' branch below,
+      // leaving the user staring at a progress bar that never moves.
+      stopPolling();
+      trackEvent('job_error', { source: getSourceLabel(url) });
+      setError('Сервер перезапустился во время обработки. Попробуйте ещё раз.');
+      startBtn.disabled = false;
+      return;
+    }
+
     const pct = typeof job.percent === 'number' ? job.percent : 0;
 
     if (job.status === 'done') {
