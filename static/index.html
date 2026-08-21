@@ -39,18 +39,18 @@
 
   <label>Ссылка на видео или трек</label>
   <div class="url-row">
-    <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." />
+    <input type="text" id="urlInput" aria-label="Ссылка на видео или трек" placeholder="https://youtube.com/watch?v=..." />
     <button type="button" class="paste-btn" id="pasteBtn" style="display:none">Вставить</button>
   </div>
 
   <div class="preview-loading" id="previewLoading"><span class="spinner"></span>Проверяем ссылку…</div>
-  <div class="preview-error" id="previewError"></div>
+  <div class="preview-error" id="previewError" role="alert"></div>
 
   <div class="preview-box" id="previewBox">
     <img class="preview-thumb" id="previewThumb" alt="" />
     <div class="preview-meta">
-      <input type="text" class="preview-title-input" id="previewTitleInput" placeholder="Название" />
-      <input type="text" class="preview-artist-input" id="previewArtistInput" placeholder="Исполнитель" />
+      <input type="text" class="preview-title-input" id="previewTitleInput" aria-label="Название трека" placeholder="Название" />
+      <input type="text" class="preview-artist-input" id="previewArtistInput" aria-label="Исполнитель" placeholder="Исполнитель" />
       <div class="preview-size" id="previewSize"></div>
     </div>
   </div>
@@ -78,15 +78,15 @@
     <div class="trim-row">
       <div class="trim-field">
         <label>С</label>
-        <input type="text" id="trimStart" placeholder="0:00" />
+        <input type="text" id="trimStart" aria-label="Начало фрагмента (мм:сс)" placeholder="0:00" />
       </div>
       <div class="trim-field">
         <label>По</label>
-        <input type="text" id="trimEnd" placeholder="мм:сс" />
+        <input type="text" id="trimEnd" aria-label="Конец фрагмента (мм:сс)" placeholder="мм:сс" />
       </div>
     </div>
     <button type="button" class="trim-reset" id="trimReset">↺ Сбросить время</button>
-    <div class="trim-error" id="trimError"></div>
+    <div class="trim-error" id="trimError" role="alert"></div>
     <div class="trim-note">При обрезке аудио перекодируется</div>
   </div>
 
@@ -105,7 +105,7 @@
     <div class="progress-track">
       <div class="progress-fill" id="progressFill"></div>
     </div>
-    <div class="status-sub" id="statusSub"></div>
+    <div class="status-sub" id="statusSub" aria-live="polite"></div>
     <button class="download-btn" id="downloadBtn">⬇ Скачать файл</button>
     <button class="share-btn" id="shareBtn">↗ Поделиться</button>
   </div>
@@ -383,7 +383,7 @@
 }
 </script>
 
-<script src="/app.js?v=7"></script>
+<script src="/app.js?v=8"></script>
 <script>
   if (location.hostname === 'audiograb.ru' || location.hostname === 'www.audiograb.ru') {
     var s = document.createElement('script');

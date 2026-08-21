@@ -428,7 +428,7 @@ function setStage(stage, pct, sub) {
 function setError(msg) {
   stageLabel.innerHTML = 'Ошибка';
   progressFill.style.width = '100%';
-  progressFill.style.background = '#ff4444';
+  progressFill.style.background = 'oklch(62% 0.17 25)';
   pctDisplay.textContent = '✗';
   pctDisplay.className = 'pct-display';
   statusSub.textContent = msg;
