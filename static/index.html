@@ -57,23 +57,23 @@
 
   <label>Формат</label>
   <div class="format-row" id="formatRow">
-    <button class="fmt-btn" data-fmt="mp3">MP3<span class="fmt-sub">универсальный</span></button>
-    <button class="fmt-btn active" data-fmt="aac">AAC (.m4a)<span class="fmt-sub">Яндекс Музыка ★</span></button>
-    <button class="fmt-btn" data-fmt="opus">Opus (.opus)<span class="fmt-sub">лучшее сжатие</span></button>
+    <button class="fmt-btn" aria-pressed="false" data-fmt="mp3">MP3<span class="fmt-sub">универсальный</span></button>
+    <button class="fmt-btn active" aria-pressed="true" data-fmt="aac">AAC (.m4a)<span class="fmt-sub">Яндекс Музыка ★</span></button>
+    <button class="fmt-btn" aria-pressed="false" data-fmt="opus">Opus (.opus)<span class="fmt-sub">лучшее сжатие</span></button>
   </div>
   <div class="fmt-note good" id="fmtNote">✓ Без перекодирования — оригинальное качество источника</div>
 
   <div class="quality-section" id="qualitySection" style="display:none">
     <label>Качество (kbps)</label>
     <div class="quality-row" id="qualityRow">
-      <button class="q-btn" data-q="128">128</button>
-      <button class="q-btn active" data-q="192">192</button>
-      <button class="q-btn" data-q="256">256</button>
-      <button class="q-btn" data-q="320">320</button>
+      <button class="q-btn" aria-pressed="false" data-q="128">128</button>
+      <button class="q-btn active" aria-pressed="true" data-q="192">192</button>
+      <button class="q-btn" aria-pressed="false" data-q="256">256</button>
+      <button class="q-btn" aria-pressed="false" data-q="320">320</button>
     </div>
   </div>
 
-  <div class="trim-toggle" id="trimToggle"><span class="trim-toggle-icon">▸</span> Обрезать фрагмент</div>
+  <div class="trim-toggle" id="trimToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="trimSection"><span class="trim-toggle-icon">▸</span> Обрезать фрагмент</div>
   <div class="trim-section" id="trimSection" style="display:none">
     <div class="trim-row">
       <div class="trim-field">
@@ -383,7 +383,7 @@
 }
 </script>
 
-<script src="/app.js?v=8"></script>
+<script src="/app.js?v=9"></script>
 <script>
   if (location.hostname === 'audiograb.ru' || location.hostname === 'www.audiograb.ru') {
     var s = document.createElement('script');

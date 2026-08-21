@@ -109,6 +109,7 @@ function trackEvent(name, data) {
 
 function collapseTrim() {
   trimToggle.classList.remove('expanded');
+  trimToggle.setAttribute('aria-expanded', 'false');
   trimSection.style.display = 'none';
 }
 
@@ -122,7 +123,12 @@ trimToggle.addEventListener('click', () => {
   const expanding = trimSection.style.display === 'none';
   trimSection.style.display = expanding ? 'block' : 'none';
   trimToggle.classList.toggle('expanded', expanding);
+  trimToggle.setAttribute('aria-expanded', expanding);
   updateSizeEstimate();
+});
+// Div toggle needs explicit keyboard activation (Enter / Space).
+trimToggle.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trimToggle.click(); }
 });
 
 trimReset.addEventListener('click', () => {
@@ -368,7 +374,11 @@ const VALID_FORMATS = ['mp3', 'aac', 'opus'];
 // both paths apply exactly the same UI state (active button, note, quality
 // section visibility, size-estimate recalc) instead of two copies drifting.
 function selectFormat(fmt) {
-  formatRow.querySelectorAll('.fmt-btn').forEach(b => b.classList.toggle('active', b.dataset.fmt === fmt));
+  formatRow.querySelectorAll('.fmt-btn').forEach(b => {
+    const on = b.dataset.fmt === fmt;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on);
+  });
   selectedFmt = fmt;
   const n = fmtNotes[fmt];
   fmtNote.textContent = n.text;
@@ -387,8 +397,9 @@ formatRow.addEventListener('click', e => {
 qualityRow.addEventListener('click', e => {
   const btn = e.target.closest('.q-btn');
   if (!btn) return;
-  qualityRow.querySelectorAll('.q-btn').forEach(b => b.classList.remove('active'));
+  qualityRow.querySelectorAll('.q-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
   btn.classList.add('active');
+  btn.setAttribute('aria-pressed', 'true');
   selectedQuality = parseInt(btn.dataset.q);
   updateSizeEstimate();
 });
