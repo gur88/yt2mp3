@@ -19,6 +19,7 @@ yt2mp3/
 │   ├── vk.html                 # /vk — same tool, VK Video-focused SEO content
 │   ├── app.css                # shared styling for the four tool pages above
 │   ├── app.js                  # shared tool logic for the four tool pages above
+│   ├── fonts/                  # self-hosted woff2 (Manrope 800 + Inter 400/500/600) — see Frontend Design System
 │   ├── privacy.html           # /privacy — legal, noindex
 │   ├── terms.html             # /terms — legal, noindex
 │   ├── 404.html               # error page, noindex
@@ -36,6 +37,16 @@ Two distinct page patterns, deliberately different:
 - **Standalone pages** (`privacy.html`, `terms.html`, `404.html`) stay fully self-contained with their own inline `:root` CSS copy, no shared stylesheet — they're simple enough that sharing isn't worth the coupling, and unlike the tool pages they don't need the interactive JS at all.
 
 Flask routes to all of these via `send_static_file` (same pattern for `/`, `/tiktok`, `/soundcloud`, `/vk`, `/privacy`, `/terms`), so URLs stay extension-less even though Flask's static folder is served at the root.
+
+## Frontend Design System & Fonts
+
+The tool UI is a dark theme built on an OKLCH design-token system in `app.css` `:root` (surface/text/accent/status colors + radii); the accent is a solid red-orange, no gradients. Restyled 2026-08-21 from the original neutral-hex theme per a Claude Design handoff — scope was visual-only, which held to a restyle-safe contract: element ids and behavior belong to `app.js`, appearance to `app.css`, so the whole redesign touched `app.js` for exactly one thing (the error-bar color literal) plus ARIA-state wiring.
+
+Typography is self-hosted, not Google Fonts — an external font CDN request would break the site's no-third-party/no-tracking stance and block render. `@font-face` in `app.css` loads **Manrope 800** (wordmark, `.logo-text`, SEO H1/H2) and **Inter 400/500/600** (all other UI) from `static/fonts/*.woff2`. The four faces are RU+Latin subsets, ~137 KB total; glyphs outside that range (e.g. CJK track titles pasted into the preview inputs) fall back to system fonts, which is fine.
+
+Regenerating a font weight is a manual, out-of-repo step: source TTFs live at `E:/Projects/шрифт/` (`manrope/`, `Inter/Inter-Variable.ttf`), subset+compressed with `fonttools`. Use a **two-pass** build — subset to a clean in-memory TTF first, then reopen and save as woff2. A single-pass `Subsetter` woff2 save skips woff2's glyf transform and inflates output ~3× (a subset came out larger than the full font). Instance variable fonts with **all** axes pinned (Inter has `opsz` + `wght`) before subsetting, or the leftover `gvar` table trips the subsetter. After changing any face, bump the `app.css` version query (see `patterns.md`).
+
+The logo mark is pure CSS (`.logo-mark` — an accent square with a CSS-triangle play glyph), not an asset. Accessibility: a shared `:focus-visible` ring; format/quality buttons carry `aria-pressed` and the trim toggle `aria-expanded`, kept in sync from `app.js`; the trim toggle is a `<div role="button">`, so `app.js` adds explicit Enter/Space activation that a native button would get for free.
 
 ## Landing Pages (`/tiktok`, `/soundcloud`, `/vk`)
 
@@ -295,7 +306,7 @@ Browser-facing security headers (`X-Content-Type-Options`, `Referrer-Policy`, `X
 
 `static/manifest.webmanifest` is served via a dedicated `/manifest.webmanifest` route (`send_from_directory(..., mimetype="application/manifest+json")`) rather than relying on the generic static handler's extension-based MIME guessing, since `.webmanifest` isn't reliably in every Python install's `mimetypes` database. Linked from the four tool pages only (`index.html`, `tiktok.html`, `soundcloud.html`, `vk.html`), not `privacy.html`/`terms.html`/`404.html`.
 
-- `theme_color`/`background_color` are `#0f0f0f` — the site's actual `--bg` from `app.css`, not the red accent, so the installed app's title bar/Android status bar tint stays subtle rather than a bright red. A matching `<meta name="theme-color">` is set in each tool page's `<head>` too, so the address-bar tint applies even before install (the manifest's `theme_color` only takes effect once installed).
+- `theme_color`/`background_color` are `#0f1014` — the hex approximation of the site's `--bg` (`oklch(14% 0.012 262)`) from `app.css`, not the red accent, so the installed app's title bar/Android status bar tint stays subtle rather than a bright red. A matching `<meta name="theme-color">` is set in each tool page's `<head>` too, so the address-bar tint applies even before install (the manifest's `theme_color` only takes effect once installed).
 - Icons (`icon-192.png`, `icon-512.png`, `icon-512-maskable.png`) are re-rendered from the same logo design as the inline `<svg>` in the tool-page header (not upscaled from `apple-touch-icon.png`, which turned out to be an older/simpler version of the mark missing the note-beam element below the play circle) — generated with Pillow (circle/triangle/line/rect primitives at 4x supersampling then downscaled), since no SVG rasterizer (rsvg-convert/Inkscape/ImageMagick) was available. The maskable variant scales the glyph to 45% of the canvas, centered, so it stays within the ~40%-radius safe zone Android's circular/squircle icon masks require — the flat ends of the horizontal bar element are the part that would clip first under an aggressive mask, that's what the safe-zone math was checked against.
 - `share_target` (`action: "/"`, `method: "GET"`, params `title`/`text`/`url`) is why Android's share sheet hands a link off as `/?title=...&text=...&url=...` — see the share-target handling below for how the query string is consumed.
 
