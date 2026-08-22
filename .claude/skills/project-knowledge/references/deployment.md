@@ -14,7 +14,7 @@ Serves on `http://localhost:5000`. Requires `ffmpeg` installed and on PATH (both
 
 ## Environments
 
-- **Production**: VPS `213.139.208.8`, app at `/var/www/yt2mp3`, run as a `systemd` service named `yt2mp3` via `gunicorn --workers 1 --bind 127.0.0.1:5000 --no-control-socket app:app`, as the unprivileged `yt2mp3` system user (see Service User & Hardening below) — single worker is load-bearing: all in-memory state — `jobs`, `info_cache`, `request_times` — lives in one process with no cross-process sharing; adding workers would silently break rate limiting, the info cache, and job status polling
+- **Production**: VPS `213.139.208.8`, app at `/var/www/yt2mp3`, run as a `systemd` service named `yt2mp3` via `gunicorn --workers 1 --timeout 300 --bind 127.0.0.1:5000 --no-control-socket app:app` (the `--timeout` comes from a drop-in, not the unit file — see Request Timeout below), as the unprivileged `yt2mp3` system user (see Service User & Hardening below) — single worker is load-bearing: all in-memory state — `jobs`, `info_cache`, `request_times` — lives in one process with no cross-process sharing; adding workers would silently break rate limiting, the info cache, and job status polling
 - **Local**: developer machine, no staging environment
 
 ## Service User & Hardening (added 2026-07-27, "Stage 2")
@@ -45,6 +45,16 @@ ReadWritePaths=/var/www/yt2mp3/downloads /var/www/yt2mp3/__pycache__
 **Unit backup:** the pre-Stage-2 unit (`User=root`, no hardening) is saved at `/root/backup-systemd-2026-07-27/yt2mp3.service` on the server — rollback is restoring that file, `daemon-reload`, `restart`.
 
 This completes the two-stage 2026-07-27 infra work (nginx canonicalization/headers, then de-rooting the service). The one security item still open afterward is Stage 1's CSP `unsafe-inline` gap (see Security Headers below) — the policy is live in Report-Only mode but provides no real XSS protection until the inline Umami loader and `offline.html`'s `onclick` move to nonces/hashes.
+
+## Request Timeout (gunicorn drop-in, added 2026-08-22)
+
+`--timeout 300` is set via a systemd drop-in at `/etc/systemd/system/yt2mp3.service.d/timeout.conf`, **not** by editing the unit file — the drop-in re-declares `ExecStart` (blanking it first, as systemd requires) and is reverted by deleting that one file plus a `daemon-reload`. Because it lives outside the git repo, `deploy.yml` never touches it; it survives deploys but would be lost in a server rebuild, so it has to be recreated by hand alongside the unit itself.
+
+**Why it exists:** on 2026-08-19 the worker was SIGKILLed mid-`GET /api/file/...` after gunicorn's default 30-second timeout expired. Downloads themselves are not the risk — `run_download` runs in a background `threading.Thread` and doesn't hold the worker — but `/api/file` serves through `send_file`, which occupies the single sync worker for the entire transfer. A large file plus a slow client trivially exceeds 30s, at which point the arbiter concludes the worker has hung and kills it, taking all in-memory `jobs` state with it.
+
+**This is a mitigation, not the fix.** The worker is still blocked for the whole transfer, so one large download still degrades responsiveness for everyone else. The real fix is `X-Accel-Redirect` — hand the file off to nginx (already in front) and free the worker immediately. That change has a trap worth knowing before starting it: `/api/file`'s `after_this_request` hook deletes the file as soon as the Flask response completes, which under `X-Accel-Redirect` is *before* nginx has finished sending it. Deletion would have to move to the janitor's sweep instead.
+
+Raising the timeout further is not free either: with `--workers 1`, a genuinely hung worker means a full outage lasting the whole timeout window.
 
 ## CI/CD
 
