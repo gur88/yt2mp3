@@ -125,11 +125,23 @@ def classify_known_bad_link(url: str) -> str | None:
                  "обработать. Откройте видео на vk.ru или vkvideo.ru и скопируйте "
                  "ссылку оттуда.")
 
+    is_vk = is_host("vk.ru") or is_host("vk.com") or is_host("vkvideo.ru")
+
     # Case B: a bare VK domain with no path to a specific video — someone
     # copied the homepage/app link instead of an individual video's URL.
-    if (is_host("vk.ru") or is_host("vk.com") or is_host("vkvideo.ru")) and parsed.path in ("", "/"):
+    if is_vk and parsed.path in ("", "/"):
         return ("Это ссылка на главную страницу VK, а не на конкретное видео. "
                  "Откройте нужный ролик и скопируйте ссылку на него.")
+
+    # Case C: a VK livestream (`/live-<owner>_<id>`). yt-dlp's VK extractor
+    # doesn't claim these at all — they fall through to the generic extractor
+    # and surface as a bare UnsupportedError, whose generic "check the link"
+    # wording is misleading here: the link is fine, the format isn't supported.
+    # Recurring in the server log (2026-08-17, and twice on 2026-08-21).
+    if is_vk and parsed.path.startswith("/live-"):
+        return ("Скачивание прямых трансляций VK не поддерживается. Если эфир уже "
+                 "завершён и сохранён как обычное видео, откройте эту запись и "
+                 "скопируйте ссылку на неё.")
 
     return None
 
@@ -471,6 +483,12 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         "outtmpl":        output_template,
         "progress_hooks": [progress_hook],
         "quiet":          True,
+        # `quiet` silences messages but NOT the download progress bar — that one
+        # is gated on `noprogress` alone (downloader/common.py). Left unset, the
+        # bar's \r-separated stream reaches gunicorn's stdout and journald logs
+        # it as unreadable "[N.NK blob data]" chunks. progress_hook above is the
+        # only progress consumer this app needs.
+        "noprogress":     True,
         "no_warnings":    True,
         "noplaylist":     True,
         # No yt-dlp postprocessors — we run ffmpeg manually for full progress
