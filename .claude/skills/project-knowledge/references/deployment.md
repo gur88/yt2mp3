@@ -56,9 +56,15 @@ Four threads on a one-core, 2GB box is deliberate rather than a formula: the wor
 
 **Why it exists:** on 2026-08-19 the worker was SIGKILLed mid-`GET /api/file/...` after gunicorn's default 30-second timeout expired. Downloads themselves are not the risk — `run_download` runs in a background `threading.Thread` and doesn't hold the worker — but `/api/file` serves through `send_file`, which occupies the single sync worker for the entire transfer. A large file plus a slow client trivially exceeds 30s, at which point the arbiter concludes the worker has hung and kills it, taking all in-memory `jobs` state with it.
 
-**This is a mitigation, not the fix.** The worker is still blocked for the whole transfer, so one large download still degrades responsiveness for everyone else. The real fix is `X-Accel-Redirect` — hand the file off to nginx (already in front) and free the worker immediately. That change has a trap worth knowing before starting it: `/api/file`'s `after_this_request` hook deletes the file as soon as the Flask response completes, which under `X-Accel-Redirect` is *before* nginx has finished sending it. Deletion would have to move to the janitor's sweep instead.
+**On `X-Accel-Redirect`, which this deliberately does not do.** Handing the file to nginx would free the serving thread instantly and is the textbook answer here — but `--threads 4` above already removed the symptom that made it urgent (one transfer stalling everyone), so what remains is an efficiency gain, not a correctness fix. Weigh it against three costs that only appear once you start:
 
-Raising the timeout further is not free either: with `--workers 1`, a genuinely hung worker means a full outage lasting the whole timeout window.
+1. `/api/file`'s `after_this_request` hook deletes the file as soon as the Flask response completes — which under `X-Accel-Redirect` is *before* nginx has finished sending it, so it would delete the file out from under the transfer. Deletion has to move to the janitor's sweep, which also means files linger up to an hour instead of vanishing right after download.
+2. `send_file(download_name=...)` currently handles RFC 5987 encoding of non-ASCII filenames for free. Serving the header by hand means doing that yourself — and these filenames really do contain Cyrillic and characters like `｜`, so the internal path needs careful encoding too.
+3. There is no nginx in local development, so the app would need a production/local branch in the file-serving path — the exact kind of dev/prod divergence that only shows up in production.
+
+Plus an nginx `internal` location block, i.e. more configuration living outside this repo.
+
+Raising the timeout further is not free: gunicorn's timeout is what eventually kills a genuinely stuck request, and with a single worker process every thread in it dies together when that happens, so a longer window means a longer wait before the service recovers itself.
 
 ## CI/CD
 
