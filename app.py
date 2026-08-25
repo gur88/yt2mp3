@@ -4,6 +4,7 @@ import socket
 import subprocess
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,44 @@ import yt_dlp
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 logger = app.logger
+
+# yt-dlp formats messages for a terminal: ANSI colour codes, and a leading \r
+# meant to overwrite its own progress line. Those reach journald, which can't
+# render a line containing them and dumps the whole thing as an opaque
+# "[N.NK blob data]" entry instead — which is exactly what happened to the
+# error messages in the 2026-08-22..25 logs, i.e. the lines that mattered most.
+# Keeps \t and \n, strips the rest.
+_TERMINAL_CODES_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def scrub_terminal_codes(text: str) -> str:
+    return _TERMINAL_CODES_RE.sub("", text)
+
+
+def log_exception(e: BaseException) -> None:
+    """logger.exception's job, minus the terminal control codes. The traceback's
+    final line repeats the exception message verbatim, so scrubbing only the
+    message we pass in wouldn't be enough — the whole formatted traceback has to
+    go through it."""
+    text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    logger.error(scrub_terminal_codes(text))
+
+
+class _YtdlpLogger:
+    """Passed to yt-dlp as its `logger` so its own output comes here instead of
+    being written straight to stdout, where it bypassed every bit of formatting
+    this app does and landed in the journal raw. Fatal errors also arrive as a
+    raised DownloadError that the caller logs, so this deliberately keeps
+    non-fatal reports (a fragment that failed while the download continued)
+    which would otherwise be lost entirely."""
+
+    def debug(self, msg):   pass          # `quiet` already covers these
+    def info(self, msg):    pass
+    def warning(self, msg): logger.warning("yt-dlp: %s", scrub_terminal_codes(str(msg)))
+    def error(self, msg):   logger.error("yt-dlp: %s", scrub_terminal_codes(str(msg)))
+
+
+_ytdlp_logger = _YtdlpLogger()
 
 OUTPUT_DIR = Path("downloads")
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -149,7 +188,7 @@ def classify_known_bad_link(url: str) -> str | None:
 def classify_extraction_error(e: Exception, fallback: str) -> str:
     """
     Turn a yt-dlp extraction failure (already logged in full via
-    logger.exception by the caller) into a more specific message than the
+    log_exception by the caller) into a more specific message than the
     generic fallback — distinguishes causes the user can't fix by
     re-checking the link (site explicitly unsupported, site markup
     changed and yt-dlp's extractor hasn't caught up yet, login/geo
@@ -170,8 +209,21 @@ def classify_extraction_error(e: Exception, fallback: str) -> str:
         return "Такой тип ссылки не поддерживается. Убедитесь, что это прямая ссылка на видео или трек."
     if "only available for registered users" in msg:
         return "Видео доступно только авторизованным пользователям на сайте-источнике — сервис не может его скачать."
+    if "confirm your age" in msg:
+        return ("Видео с возрастным ограничением — источник отдаёт его только "
+                 "авторизованным пользователям, поэтому скачать его не получится.")
     if "not available from your location due to geo restriction" in msg or "not available in your country" in msg:
         return "Видео недоступно из-за географических ограничений сайта-источника."
+    if "CERTIFICATE_VERIFY_FAILED" in msg:
+        return ("У сайта-источника проблема с сертификатом безопасности — сервис не "
+                 "может безопасно к нему подключиться.")
+    # Transient failures at the source, checked ahead of the "Unable to extract"
+    # branch below: a timeout can surface wrapped in that wording too, and
+    # "try again in a minute" is the useful advice there, not "the site changed
+    # its markup". Both of these were hitting the generic fallback, whose
+    # "try a different link" wording is actively wrong for a temporary blip.
+    if re.search(r"HTTP Error 5\d\d", msg) or "timed out" in msg:
+        return "Сайт-источник сейчас не отвечает. Попробуйте ещё раз через минуту."
     if "Unable to extract" in msg:
         return ("Сайт-источник недавно изменил структуру страницы, и наш сервис пока не успел под "
                  "это подстроиться. Попробуйте ещё раз позже.")
@@ -519,12 +571,13 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         "noprogress":     True,
         "no_warnings":    True,
         "noplaylist":     True,
+        "logger":         _ytdlp_logger,
         # No yt-dlp postprocessors — we run ffmpeg manually for full progress
     }
 
     thumb_path: Path | None = None
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "logger": _ytdlp_logger}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
             raise UserFacingError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
@@ -600,7 +653,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"]  = str(e)
     except Exception as e:
-        logger.exception(e)
+        log_exception(e)
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"]  = classify_extraction_error(e, "Не удалось обработать это видео. Попробуйте другое или другую ссылку.")
     finally:
@@ -701,7 +754,7 @@ def get_info():
         return jsonify({"error": known_bad_error}), 400
 
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "logger": _ytdlp_logger}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
             return jsonify({"error": "Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео"}), 400
@@ -710,10 +763,10 @@ def get_info():
         if flat_info.get("is_live"):
             return jsonify({"error": LIVE_STREAM_ERROR}), 400
 
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True, "logger": _ytdlp_logger}) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
-        logger.exception(e)
+        log_exception(e)
         return jsonify({"error": classify_extraction_error(e, "Не удалось получить информацию о видео. Проверьте ссылку.")}), 400
 
     result = {
