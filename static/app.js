@@ -276,7 +276,15 @@ async function fetchPreview(url) {
     const data = await res.json();
     if (requestId !== previewRequestId) return; // stale response, URL changed since
     previewLoading.classList.remove('visible');
-    if (data.error) { trackEvent('preview_error', { source: getSourceLabel(url) }); showPreviewError(data.error); return; }
+    // reason is the server's stable error_code, never the Russian text and never
+    // the URL — it groups on the Umami dashboard, so a spike in one cause is
+    // visible there without reading the journal. Older responses may not carry
+    // one, hence the fallback.
+    if (data.error) {
+      trackEvent('preview_error', { source: getSourceLabel(url), reason: data.error_code || 'unclassified' });
+      showPreviewError(data.error);
+      return;
+    }
 
     if (url !== currentTrackUrl) {
       // Genuinely different track from whatever the trim fields were last
@@ -552,7 +560,7 @@ startBtn.addEventListener('click', async () => {
       // undefined and falls through to the 'pending' branch below,
       // leaving the user staring at a progress bar that never moves.
       stopPolling();
-      trackEvent('job_error', { source: getSourceLabel(url) });
+      trackEvent('job_error', { source: getSourceLabel(url), reason: 'job_vanished' });
       setError('Сервер перезапустился во время обработки. Попробуйте ещё раз.');
       startBtn.disabled = false;
       return;
@@ -624,7 +632,7 @@ startBtn.addEventListener('click', async () => {
 
     } else if (job.status === 'error') {
       stopPolling();
-      trackEvent('job_error', { source: getSourceLabel(url) });
+      trackEvent('job_error', { source: getSourceLabel(url), reason: job.error_code || 'unclassified' });
       setError(job.error || 'Неизвестная ошибка');
       startBtn.disabled = false;
 

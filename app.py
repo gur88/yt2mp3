@@ -133,9 +133,15 @@ def validate_url(url: str) -> str | None:
     return None
 
 
-def classify_known_bad_link(url: str) -> str | None:
+def classify_known_bad_link(url: str) -> tuple[str, str] | None:
     """
-    Return a pointed Russian error for two known-bad-input shapes that
+    Return (Russian error, Umami reason code), or None if the link isn't one of
+    the shapes recognised here. The codes share the namespace _EXTRACTION_ERRORS
+    uses; these are worth counting separately because each one is a specific
+    copy-paste mistake, and a spike in one is a hint about where users are
+    coming from rather than about anything being broken.
+
+    A pointed Russian error for known-bad-input shapes that
     aren't VK-extractor bugs but are common copy-paste mistakes landing on
     the /vk page (confirmed via server-log diagnostic, 2026-08-02: 6/6
     UnsupportedError failures in a 24h window were one of these two, VK's
@@ -162,7 +168,7 @@ def classify_known_bad_link(url: str) -> str | None:
     if (is_host("ya.ru") or is_host("yandex.ru")) and parsed.path.startswith("/video/preview/"):
         return ("Это ссылка с Яндекс.Видео, а не с самого VK — сервис не может её "
                  "обработать. Откройте видео на vk.ru или vkvideo.ru и скопируйте "
-                 "ссылку оттуда.")
+                 "ссылку оттуда.", "yandex_wrapper")
 
     is_vk = is_host("vk.ru") or is_host("vk.com") or is_host("vkvideo.ru")
 
@@ -170,7 +176,7 @@ def classify_known_bad_link(url: str) -> str | None:
     # copied the homepage/app link instead of an individual video's URL.
     if is_vk and parsed.path in ("", "/"):
         return ("Это ссылка на главную страницу VK, а не на конкретное видео. "
-                 "Откройте нужный ролик и скопируйте ссылку на него.")
+                 "Откройте нужный ролик и скопируйте ссылку на него.", "vk_homepage")
 
     # Case C: a VK livestream (`/live-<owner>_<id>`). yt-dlp's VK extractor
     # doesn't claim these at all — they fall through to the generic extractor
@@ -180,56 +186,83 @@ def classify_known_bad_link(url: str) -> str | None:
     if is_vk and parsed.path.startswith("/live-"):
         return ("Скачивание прямых трансляций VK не поддерживается. Если эфир уже "
                  "завершён и сохранён как обычное видео, откройте эту запись и "
-                 "скопируйте ссылку на неё.")
+                 "скопируйте ссылку на неё.", "vk_livestream")
 
     return None
 
 
-def classify_extraction_error(e: Exception, fallback: str) -> str:
+# (reason code, test against yt-dlp's message, user-facing Russian text).
+#
+# Order is load-bearing: the transient entry sits ahead of extractor_outdated
+# because a timeout can surface wrapped in "Unable to extract" wording too, and
+# "try again in a minute" is the useful advice there, not "the site changed its
+# markup".
+#
+# The reason code is the half that reaches Umami, so it has to stay stable even
+# when the Russian text is reworded — the dashboard groups on it, and renaming a
+# code silently splits one line on a chart into two. Keeping both halves in one
+# row is deliberate: a separate code-matching function would duplicate every
+# substring here and drift out of sync with the wording it is supposed to describe.
+_EXTRACTION_ERRORS: tuple[tuple[str, object, str], ...] = (
+    ("unsupported_site",
+     lambda m: "is not supported and will not be supported" in m,
+     "Этот сайт не поддерживается сервисом."),
+    ("unsupported_url",
+     lambda m: "Unsupported URL" in m,
+     "Такой тип ссылки не поддерживается. Убедитесь, что это прямая ссылка на видео или трек."),
+    ("login_required",
+     lambda m: "only available for registered users" in m,
+     "Видео доступно только авторизованным пользователям на сайте-источнике — сервис не может его скачать."),
+    ("age_restricted",
+     lambda m: "confirm your age" in m,
+     "Видео с возрастным ограничением — источник отдаёт его только "
+     "авторизованным пользователям, поэтому скачать его не получится."),
+    ("geo_blocked",
+     lambda m: "not available from your location due to geo restriction" in m or "not available in your country" in m,
+     "Видео недоступно из-за географических ограничений сайта-источника."),
+    ("bad_certificate",
+     lambda m: "CERTIFICATE_VERIFY_FAILED" in m,
+     "У сайта-источника проблема с сертификатом безопасности — сервис не "
+     "может безопасно к нему подключиться."),
+    ("source_unavailable",
+     lambda m: bool(re.search(r"HTTP Error 5\d\d", m)) or "timed out" in m,
+     "Сайт-источник сейчас не отвечает. Попробуйте ещё раз через минуту."),
+    ("extractor_outdated",
+     lambda m: "Unable to extract" in m,
+     "Сайт-источник недавно изменил структуру страницы, и наш сервис пока не успел под "
+     "это подстроиться. Попробуйте ещё раз позже."),
+    ("server_network",
+     lambda m: "Temporary failure in name resolution" in m,
+     "Временная проблема с сетью на сервере. Попробуйте ещё раз через минуту."),
+)
+
+
+def classify_extraction_error(e: Exception, fallback: str) -> tuple[str, str]:
     """
     Turn a yt-dlp extraction failure (already logged in full via
-    log_exception by the caller) into a more specific message than the
-    generic fallback — distinguishes causes the user can't fix by
-    re-checking the link (site explicitly unsupported, site markup
-    changed and yt-dlp's extractor hasn't caught up yet, login/geo
-    restriction) from a genuinely unrecognized failure, where the
-    caller's own fallback is still the honest answer. Matches on
-    yt-dlp's own message text rather than exception subclasses, since
-    DownloadError (what actually reaches these except blocks) re-wraps
-    the original message as a plain string and doesn't reliably
-    preserve the original type. `fallback` is caller-supplied because
-    the two call sites cover different failure surfaces (get_info: pure
-    metadata lookup; run_download: also ffmpeg/filesystem failures
-    unrelated to the link itself) and shouldn't share one fallback wording.
+    log_exception by the caller) into (message, reason_code) — a more
+    specific message than the generic fallback, plus the stable code the
+    frontend reports to Umami so a spike in one cause is visible on the
+    dashboard without reading the journal.
+
+    Distinguishes causes the user can't fix by re-checking the link (site
+    explicitly unsupported, site markup changed and yt-dlp's extractor
+    hasn't caught up yet, login/geo restriction) from a genuinely
+    unrecognized failure, where the caller's own fallback is still the
+    honest answer. Matches on yt-dlp's own message text rather than
+    exception subclasses, since DownloadError (what actually reaches these
+    except blocks) re-wraps the original message as a plain string and
+    doesn't reliably preserve the original type. `fallback` is
+    caller-supplied because the two call sites cover different failure
+    surfaces (get_info: pure metadata lookup; run_download: also
+    ffmpeg/filesystem failures unrelated to the link itself) and shouldn't
+    share one fallback wording.
     """
     msg = str(e)
-    if "is not supported and will not be supported" in msg:
-        return "Этот сайт не поддерживается сервисом."
-    if "Unsupported URL" in msg:
-        return "Такой тип ссылки не поддерживается. Убедитесь, что это прямая ссылка на видео или трек."
-    if "only available for registered users" in msg:
-        return "Видео доступно только авторизованным пользователям на сайте-источнике — сервис не может его скачать."
-    if "confirm your age" in msg:
-        return ("Видео с возрастным ограничением — источник отдаёт его только "
-                 "авторизованным пользователям, поэтому скачать его не получится.")
-    if "not available from your location due to geo restriction" in msg or "not available in your country" in msg:
-        return "Видео недоступно из-за географических ограничений сайта-источника."
-    if "CERTIFICATE_VERIFY_FAILED" in msg:
-        return ("У сайта-источника проблема с сертификатом безопасности — сервис не "
-                 "может безопасно к нему подключиться.")
-    # Transient failures at the source, checked ahead of the "Unable to extract"
-    # branch below: a timeout can surface wrapped in that wording too, and
-    # "try again in a minute" is the useful advice there, not "the site changed
-    # its markup". Both of these were hitting the generic fallback, whose
-    # "try a different link" wording is actively wrong for a temporary blip.
-    if re.search(r"HTTP Error 5\d\d", msg) or "timed out" in msg:
-        return "Сайт-источник сейчас не отвечает. Попробуйте ещё раз через минуту."
-    if "Unable to extract" in msg:
-        return ("Сайт-источник недавно изменил структуру страницы, и наш сервис пока не успел под "
-                 "это подстроиться. Попробуйте ещё раз позже.")
-    if "Temporary failure in name resolution" in msg:
-        return "Временная проблема с сетью на сервере. Попробуйте ещё раз через минуту."
-    return fallback
+    for code, matches, text in _EXTRACTION_ERRORS:
+        if matches(msg):
+            return text, code
+    return fallback, "unclassified"
 
 
 def check_rate_limit(ip: str) -> tuple[str, int | None] | None:
@@ -527,7 +560,17 @@ class UserFacingError(Exception):
     never as a wrapper around another exception. run_download catches this
     separately so a known business-rule rejection (playlist link, corrupt
     trim output) isn't swallowed by the generic fallback meant for
-    unexplained crashes (yt-dlp/ffmpeg internals)."""
+    unexplained crashes (yt-dlp/ffmpeg internals).
+
+    `code` is the Umami reason code for this rejection, in the same namespace
+    as the one _EXTRACTION_ERRORS assigns. These are the rejections this app
+    decides on itself rather than reading out of a yt-dlp message, and they are
+    the ones most worth watching on the dashboard — a livestream refusal or a
+    size abort says something about what users are trying to do here."""
+
+    def __init__(self, message: str, code: str = "rejected"):
+        super().__init__(message)
+        self.code = code
 
 
 def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
@@ -546,7 +589,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
             if (d.get("downloaded_bytes") or 0) > MAX_DOWNLOAD_BYTES:
                 raise UserFacingError(
                     "Файл слишком большой — скачивание остановлено. Попробуйте "
-                    "видео покороче или обрежьте нужный фрагмент.")
+                    "видео покороче или обрежьте нужный фрагмент.", "too_large")
             raw = d.get("_percent_str", "0%").strip()
             m = re.search(r"([\d.]+)", raw)
             raw_pct = float(m.group(1)) if m else 0
@@ -580,12 +623,12 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "logger": _ytdlp_logger}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
-            raise UserFacingError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
+            raise UserFacingError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео", "playlist")
         # Rejected here, off the cheap extract_flat probe, so a livestream is
         # turned away before a single byte is written — the download call below
         # would never return on its own.
         if flat_info.get("is_live"):
-            raise UserFacingError(LIVE_STREAM_ERROR)
+            raise UserFacingError(LIVE_STREAM_ERROR, "live_stream")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info          = ydl.extract_info(url, download=True)
@@ -640,7 +683,7 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         # ffmpeg can happily "succeed" on while producing a near-empty file.
         if not output_path.exists() or output_path.stat().st_size < MIN_OUTPUT_BYTES:
             output_path.unlink(missing_ok=True)
-            raise UserFacingError("Не удалось обработать фрагмент. Проверьте параметры обрезки.")
+            raise UserFacingError("Не удалось обработать фрагмент. Проверьте параметры обрезки.", "bad_trim")
 
         jobs[job_id].update({
             "status":   "done",
@@ -650,12 +693,16 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
         })
 
     except UserFacingError as e:
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"]  = str(e)
+        jobs[job_id]["status"]     = "error"
+        jobs[job_id]["error"]      = str(e)
+        jobs[job_id]["error_code"] = e.code
     except Exception as e:
         log_exception(e)
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"]  = classify_extraction_error(e, "Не удалось обработать это видео. Попробуйте другое или другую ссылку.")
+        message, code = classify_extraction_error(
+            e, "Не удалось обработать это видео. Попробуйте другое или другую ссылку.")
+        jobs[job_id]["status"]     = "error"
+        jobs[job_id]["error"]      = message
+        jobs[job_id]["error_code"] = code
     finally:
         if thumb_path:
             thumb_path.unlink(missing_ok=True)
@@ -747,27 +794,30 @@ def get_info():
 
     validation_error = validate_url(url)
     if validation_error:
-        return jsonify({"error": validation_error}), 400
+        return jsonify({"error": validation_error, "error_code": "invalid_url"}), 400
 
-    known_bad_error = classify_known_bad_link(url)
-    if known_bad_error:
-        return jsonify({"error": known_bad_error}), 400
+    known_bad = classify_known_bad_link(url)
+    if known_bad:
+        message, code = known_bad
+        return jsonify({"error": message, "error_code": code}), 400
 
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "logger": _ytdlp_logger}) as ydl:
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
-            return jsonify({"error": "Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео"}), 400
+            return jsonify({"error": "Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео",
+                            "error_code": "playlist"}), 400
         # Same rejection as run_download, so the preview says no before the user
         # ever gets a Download button to press.
         if flat_info.get("is_live"):
-            return jsonify({"error": LIVE_STREAM_ERROR}), 400
+            return jsonify({"error": LIVE_STREAM_ERROR, "error_code": "live_stream"}), 400
 
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True, "logger": _ytdlp_logger}) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
         log_exception(e)
-        return jsonify({"error": classify_extraction_error(e, "Не удалось получить информацию о видео. Проверьте ссылку.")}), 400
+        message, code = classify_extraction_error(e, "Не удалось получить информацию о видео. Проверьте ссылку.")
+        return jsonify({"error": message, "error_code": code}), 400
 
     result = {
         "title":     info.get("title"),
@@ -798,11 +848,12 @@ def start_download():
 
     validation_error = validate_url(url)
     if validation_error:
-        return jsonify({"error": validation_error}), 400
+        return jsonify({"error": validation_error, "error_code": "invalid_url"}), 400
 
-    known_bad_error = classify_known_bad_link(url)
-    if known_bad_error:
-        return jsonify({"error": known_bad_error}), 400
+    known_bad = classify_known_bad_link(url)
+    if known_bad:
+        message, code = known_bad
+        return jsonify({"error": message, "error_code": code}), 400
 
     try:
         trim_start = parse_trim_value(data.get("trim_start"))
