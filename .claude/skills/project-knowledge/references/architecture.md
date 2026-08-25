@@ -312,7 +312,7 @@ Added 2026-08-02 after a server-log diagnostic on a run of recurring `/vk` page 
 
 Both return a specific Russian message telling the user what to do (open the video on VK directly / open the specific video, not the homepage), instead of the generic "не удалось обработать это видео" fallback. Matching is exact-host-or-subdomain (`m.vk.com` etc. included), the same style as `app.js`'s `getSourceLabel()` — no shared code between them (different language/runtime), just the same matching approach.
 
-**Known gap, not fixed:** `getSourceLabel()` on the frontend (used for Umami's per-source analytics labeling) does not include `vk.ru` in its host list, only `vk.com`/`vkvideo.ru` — found during this work, left as-is since it's a separate, unrelated analytics-labeling concern.
+`getSourceLabel()` on the frontend covers the same three VK hosts, aligned 2026-08-25. It previously omitted `vk.ru`, so such a link was rejected as VK server-side but reported to Umami as `other` — tolerable while the events only carried `source`, but not once they started carrying a `reason` code, since it split one source across two labels on the exact breakdown those codes exist to produce.
 
 ## Generic Extraction-Failure Classification (`classify_extraction_error`)
 

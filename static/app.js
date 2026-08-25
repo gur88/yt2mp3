@@ -92,7 +92,11 @@ function getSourceLabel(url) {
   if (is('youtube.com') || is('youtu.be')) return 'youtube';
   if (is('tiktok.com')) return 'tiktok';
   if (is('soundcloud.com')) return 'soundcloud';
-  if (is('vk.com') || is('vkvideo.ru')) return 'vk';
+  // vk.ru included to match the backend's own VK host list in
+  // classify_known_bad_link — without it a vk.ru link is rejected as a VK
+  // link server-side but reported to Umami as 'other', splitting one
+  // source across two labels on the very breakdown these events exist for.
+  if (is('vk.com') || is('vk.ru') || is('vkvideo.ru')) return 'vk';
   return 'other';
 }
 
