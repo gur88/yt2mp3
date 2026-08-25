@@ -294,6 +294,26 @@ FMT_SELECTORS = {
 # track's actual end producing a near-zero-length file from ffmpeg).
 MIN_OUTPUT_BYTES = 2048
 
+# Hard ceiling on what a single job may pull before it is aborted. This is a
+# backstop, not a policy: the `is_live` rejection below is what actually stops
+# the case this was written for (2026-08-25, three concurrent jobs on a 24/7
+# music stream filled downloads/ with 6.7GB and took the disk to 86%). It has
+# to be enforced by hand in progress_hook because yt-dlp's own `max_filesize`
+# only compares a *declared* Content-Length before starting, and the fragmented
+# HLS/DASH downloaders — the ones a livestream actually uses — never consult it
+# at all. Sized well above any plausible audio-only download (a 12-hour
+# audiobook at 128kbps is well under 1GB) so it only ever catches runaways;
+# `bestaudio/best` can fall back to a full video stream, which is what makes
+# multi-GB pulls reachable in the first place.
+MAX_DOWNLOAD_BYTES = 1536 * 1024 * 1024  # 1.5 GiB
+
+# Rejection shared by /api/info and /api/download. Kept as one constant rather
+# than two literals so the two endpoints cannot drift apart (patterns.md
+# requires identical wording for a condition visible from both).
+LIVE_STREAM_ERROR = ("Это прямая трансляция — у неё нет конца, поэтому скачать её "
+                      "нельзя. Если эфир уже завершён, откройте его запись и "
+                      "скопируйте ссылку на неё.")
+
 # --- /api/thumbnail: server builds the i.ytimg.com URL itself from these two
 # validated parts, no user-supplied URL is ever fetched — SSRF-proof by
 # construction, no validate_url call needed here.
@@ -467,6 +487,14 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
 
     def progress_hook(d):
         if d["status"] == "downloading":
+            # Raising here is what actually aborts the download — verified that
+            # a UserFacingError propagates out of extract_info unwrapped, so it
+            # lands in the dedicated except clause below rather than the generic
+            # one. See MAX_DOWNLOAD_BYTES for why this can't be left to yt-dlp.
+            if (d.get("downloaded_bytes") or 0) > MAX_DOWNLOAD_BYTES:
+                raise UserFacingError(
+                    "Файл слишком большой — скачивание остановлено. Попробуйте "
+                    "видео покороче или обрежьте нужный фрагмент.")
             raw = d.get("_percent_str", "0%").strip()
             m = re.search(r"([\d.]+)", raw)
             raw_pct = float(m.group(1)) if m else 0
@@ -500,6 +528,11 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
             raise UserFacingError("Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео")
+        # Rejected here, off the cheap extract_flat probe, so a livestream is
+        # turned away before a single byte is written — the download call below
+        # would never return on its own.
+        if flat_info.get("is_live"):
+            raise UserFacingError(LIVE_STREAM_ERROR)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info          = ydl.extract_info(url, download=True)
@@ -573,6 +606,19 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
     finally:
         if thumb_path:
             thumb_path.unlink(missing_ok=True)
+        # A failed job leaves whatever it had already written behind — yt-dlp's
+        # `.part`/`.ytdl` files, a half-finished ffmpeg output. The janitor only
+        # sweeps by mtime an hour later, so without this every failure (a read
+        # timeout, a 503, an abort on MAX_DOWNLOAD_BYTES) parks its partial file
+        # on disk until then; the size cap in particular would otherwise leave
+        # exactly the 1.5GB it just refused to finish downloading. Guarded on
+        # the error status so a successful job keeps the output /api/file serves.
+        if jobs.get(job_id, {}).get("status") == "error":
+            try:
+                for leftover in OUTPUT_DIR.glob(f"{job_id}*"):
+                    leftover.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning("Could not clear partial files for %s: %s", job_id, e)
         release_concurrent_slot(ip)
 
 
@@ -659,6 +705,10 @@ def get_info():
             flat_info = ydl.extract_info(url, download=False)
         if flat_info.get("_type") == "playlist":
             return jsonify({"error": "Ссылки на плейлисты пока не поддерживаются, вставьте ссылку на конкретное видео"}), 400
+        # Same rejection as run_download, so the preview says no before the user
+        # ever gets a Download button to press.
+        if flat_info.get("is_live"):
+            return jsonify({"error": LIVE_STREAM_ERROR}), 400
 
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
             info = ydl.extract_info(url, download=False)
