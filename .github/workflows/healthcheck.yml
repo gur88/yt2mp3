@@ -3,20 +3,25 @@ name: Health check
 # Catches the class of problem the error log does not show. The 2026-08-25
 # incident — three jobs stuck on a livestream, downloads/ at 6.7GB, disk at 86%
 # with roughly fifteen minutes of headroom left — produced no alarming log
-# entries at all; it was only noticed because someone happened to look. Every
-# threshold below is taken from a number actually observed that day.
+# entries at all; it was only noticed because someone happened to look.
 #
-# Reuses the SSH secrets the deploy workflow already relies on, so this adds no
-# new credential and no new service on the box.
+# The checks and thresholds themselves live in ops/healthcheck.sh, which the
+# on-box systemd timer runs too. Keeping them in one file is the point: the two
+# callers would otherwise drift apart, and a monitor that disagrees with itself
+# is worse than none.
 #
-# Notes for whoever maintains this:
-#   - GitHub only runs schedules from the default branch, and disables them
-#     after 60 days without repo activity — worth re-checking if it ever goes
-#     quiet for a long stretch.
-#   - Scheduled runs can be delayed under load; treat the cadence as "about
-#     hourly", not a guarantee.
-#   - A failed run notifies whoever last touched the cron line, per GitHub's
-#     own rules for scheduled workflows.
+# This caller's real job is the one the timer structurally cannot do: a monitor
+# running on the server cannot report that the server is unreachable. If SSH
+# fails here, the run fails and GitHub emails. Frequency matters less for that,
+# which is just as well — measured on 2026-08-27, GitHub ran this 8 times in 30
+# hours with a 10-hour overnight gap, so the hourly cron below is a request, not
+# a promise. The timer covers cadence; this covers "is it there at all".
+#
+# Also worth knowing: GitHub only runs schedules from the default branch, and
+# disables them after 60 days without repo activity.
+#
+# No --notify here, so this path never sends Telegram messages — the timer owns
+# notification, and duplicate alerts from two sources would be noise.
 
 on:
   schedule:
@@ -33,59 +38,6 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            # Deliberately not `set -e`: every check runs and every breach is
-            # reported, so one notification shows the whole picture instead of
-            # only whatever happened to fail first.
-            FAILED=0
-            note() { echo "UNHEALTHY: $1"; FAILED=1; }
-
-            DISK_PCT=$(df --output=pcent / | tail -1 | tr -dc '0-9')
-            DOWNLOADS_MB=$(du -sm /var/www/yt2mp3/downloads 2>/dev/null | cut -f1)
-            MEM_RAW=$(systemctl show yt2mp3 -p MemoryCurrent --value)
-            case "$MEM_RAW" in
-              ''|*[!0-9]*) MEM_MB="unknown" ;;
-              *)           MEM_MB=$((MEM_RAW / 1024 / 1024)) ;;
-            esac
-            CRASHES=$(journalctl -u yt2mp3 --since "-70min" --no-pager 2>/dev/null \
-                      | grep -cE "WORKER TIMEOUT|was sent SIGKILL" || true)
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 http://127.0.0.1:5000/ || echo "000")
-
-            echo "disk=${DISK_PCT}%  downloads=${DOWNLOADS_MB}MB  memory=${MEM_MB}MB  crashes_last_hour=${CRASHES}  http=${HTTP}"
-
-            # Disk. It went from comfortable to fifteen-minutes-from-full in
-            # under an hour on 2026-08-25, so this wants headroom, not a
-            # last-moment warning.
-            [ "$DISK_PCT" -ge 80 ] && note "disk is ${DISK_PCT}% full"
-
-            # downloads/ is transient by design — the janitor sweeps it hourly
-            # and it normally sits near empty. Sustained gigabytes means
-            # something is writing that will not stop on its own.
-            [ -n "$DOWNLOADS_MB" ] && [ "$DOWNLOADS_MB" -ge 3000 ] && note "downloads/ holds ${DOWNLOADS_MB}MB"
-
-            # Memory is the weakest signal here, so it is tuned to fire only on
-            # clearly pathological state. Observed: 36-126MB at rest, ~70MB
-            # during an ordinary download, but 755MB during a legitimate large
-            # one (2026-08-27, no crash, back to 126MB afterwards) versus 852MB
-            # held for over an hour by the stuck-livestream incident. That
-            # leaves a band of roughly 100MB between "busy" and "broken", and
-            # this reads MemoryCurrent, so a check landing mid-download sees the
-            # spike. 600MB sat below the legitimate peak and would have cried
-            # wolf; 900MB would sit above the incident and miss it.
-            #
-            # Do not treat this as the primary detector. In the incident the
-            # unambiguous signals were downloads/ at 6.7GB against a 3GB
-            # threshold and the disk at 86% — both orders of magnitude clear of
-            # normal, where this one is a coin-flip away from it.
-            [ "$MEM_MB" != "unknown" ] && [ "$MEM_MB" -ge 800 ] && note "worker memory is ${MEM_MB}MB"
-
-            [ "$CRASHES" -gt 0 ] && note "${CRASHES} worker timeout/SIGKILL entries in the last hour"
-
-            systemctl is-active --quiet yt2mp3 || note "service is not active"
-
-            [ "$HTTP" != "200" ] && note "homepage returned HTTP ${HTTP}"
-
-            if [ "$FAILED" -eq 1 ]; then
-              exit 1
-            fi
-            echo "healthy"
+          # Invoked through `sh` rather than relying on the executable bit,
+          # which does not survive a checkout from a Windows working tree.
+          script: sh /var/www/yt2mp3/ops/healthcheck.sh

@@ -1,0 +1,8 @@
+# This working tree is Windows with core.autocrlf=true, but these files are
+# executed on Linux — the server for shell scripts, GitHub's runners for
+# workflows. A stray \r there fails in ways that read as nonsense: the shebang
+# picks up the carriage return, or a shell line dies with "$'\r': command not
+# found". That exact error showed up twice while building the health check, so
+# pin the endings rather than depending on anyone's git config.
+*.sh   text eol=lf
+*.yml  text eol=lf
