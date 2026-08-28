@@ -606,6 +606,15 @@ startBtn.addEventListener('click', async () => {
           URL.revokeObjectURL(objectUrl);
           reset();
           statusBox.classList.remove('visible');
+          // Clear the finished link instead of leaving it sitting in the field.
+          // A retained URL is what produced the spliced pastes in the logs: the
+          // next paste landed at the caret, which on a phone is wherever the
+          // user tapped, splicing a whole URL into the middle of the old one.
+          // Deliberately here and not in reset(), which also runs at the *start*
+          // of a job — clearing there would blank the field while the download
+          // the user is watching is still running.
+          urlInput.value = '';
+          hidePreview();
         }, 2000);
       };
 

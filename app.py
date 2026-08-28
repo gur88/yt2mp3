@@ -133,6 +133,13 @@ def validate_url(url: str) -> str | None:
     return None
 
 
+# Mirrors the host half of yt-dlp's YandexVideoPreviewIE: any yandex TLD plus
+# the regional second-level ones, and ya.ru alongside. Anchored at both ends so
+# it matches the registrable domain or any subdomain of it, and nothing that
+# merely ends in something similar.
+_YANDEX_HOST_RE = re.compile(r'(?:^|\.)(?:ya\.ru|yandex\.\w{2,3}(?:\.(?:am|ge|il|tr))?)$')
+
+
 def classify_known_bad_link(url: str) -> tuple[str, str] | None:
     """
     Return (Russian error, Umami reason code), or None if the link isn't one of
@@ -161,11 +168,35 @@ def classify_known_bad_link(url: str) -> tuple[str, str] | None:
     def is_host(base: str) -> bool:
         return host == base or host.endswith("." + base)
 
+    # Two links pasted into one another. Recurring and entirely our own doing:
+    # the URL field kept its previous value after a finished job, so a paste
+    # landed at wherever the caret happened to be — mid-string on a phone —
+    # splicing a whole URL into the middle of the old one. Six of these in the
+    # 2026-08-27..28 logs, including the same user retrying 16 seconds later and
+    # hitting it again, because the field just looks like a long link either way.
+    # The field is cleared on reset now, but this stays: the same splice is easy
+    # to make in any text, and without it the user gets the useless "this kind of
+    # link isn't supported" for a mistake that is obvious once pointed at.
+    #
+    # Counted before the query string only, so a legitimate URL carrying another
+    # one in a parameter (a redirect) isn't mistaken for this.
+    if url.split("?", 1)[0].count("://") > 1:
+        return ("Похоже, в поле попали две ссылки сразу. Очистите поле и "
+                 "вставьте одну.", "two_urls")
+
     # Case A: Yandex.Video's own wrapper link for a VK-hosted video, not a
     # direct VK URL — Yandex indexes/embeds VK videos and hands out this
-    # share link (under either of Yandex's two domains) when copied from
-    # its own search results.
-    if (is_host("ya.ru") or is_host("yandex.ru")) and parsed.path.startswith("/video/preview/"):
+    # share link when copied from its own search results.
+    #
+    # Host and path both mirror yt-dlp's YandexVideoPreviewIE rather than the
+    # couple of shapes seen first: it accepts any yandex TLD and both a
+    # `/video/preview/<id>` path and a `/video/preview?filmId=<id>` query. The
+    # original check required a trailing slash on `ya.ru`/`yandex.ru` only, so
+    # the query form slipped past and reached yt-dlp, where it surfaced as an
+    # "Unable to extract data_raw" extractor error — blamed on Yandex changing
+    # its markup rather than on this check being too narrow (seen 2026-08-28).
+    if _YANDEX_HOST_RE.search(host) and (
+            parsed.path == "/video/preview" or parsed.path.startswith("/video/preview/")):
         return ("Это ссылка с Яндекс.Видео, а не с самого VK — сервис не может её "
                  "обработать. Откройте видео на vk.ru или vkvideo.ru и скопируйте "
                  "ссылку оттуда.", "yandex_wrapper")
