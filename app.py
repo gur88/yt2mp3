@@ -188,6 +188,17 @@ def classify_known_bad_link(url: str) -> tuple[str, str] | None:
                  "завершён и сохранён как обычное видео, откройте эту запись и "
                  "скопируйте ссылку на неё.", "vk_livestream")
 
+    # Case D: a VK podcast (`/podcast-<owner>_<id>`). Not a "not yet" — yt-dlp
+    # has no VK audio support at all (the word doesn't appear in its vk.py, and
+    # every URL form was confirmed to fall through to the generic extractor),
+    # and VK guards audio far more tightly than video: it has supported VK video
+    # for years without ever adding audio. So the message points at the way out
+    # that does work today rather than suggesting the user retry.
+    if is_vk and parsed.path.startswith("/podcast-"):
+        return ("Подкасты VK не поддерживаются — сервис работает с видео. Если у "
+                 "выпуска есть видеоверсия, откройте её и скопируйте ссылку на неё.",
+                 "vk_podcast")
+
     return None
 
 
