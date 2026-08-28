@@ -121,7 +121,26 @@ The one discipline this depends on: actually looking at the Umami dashboard occa
 
 ## Environment Variables
 
-None currently.
+The app itself reads none. Monitoring has one file — see below.
+
+## Monitoring
+
+Two callers, one set of checks. `ops/healthcheck.sh` lives in this repo and is deployed with everything else, so a threshold edited there changes both callers at once; each threshold carries the observation it came from in a comment beside it.
+
+- **`yt2mp3-healthcheck.timer`** on the box runs it every 15 minutes with `--notify`. Fifteen minutes is taken from the disk: on 2026-08-25 it went from comfortable to roughly that much headroom within the hour.
+- **The GitHub workflow** (`.github/workflows/healthcheck.yml`) runs the same script without `--notify`, so it never sends Telegram messages. Its real job is the one the timer structurally cannot do: a monitor running on the server cannot tell you the server is unreachable. Cadence there is unreliable anyway — measured 2026-08-27, GitHub ran it 8 times in 30 hours with a 10-hour overnight gap, and it disables schedules entirely after 60 days without repo activity.
+
+**Notifications fire on state change only**, never on every run. A breach lasting hours would otherwise send an identical message each time, which only teaches you to ignore them. Recovery is announced too — without that, silence is ambiguous, since it equally describes a monitor that has quietly stopped running. State lives in `/var/lib/yt2mp3-healthcheck.state`.
+
+**Three pieces live outside this repo and are lost in a server rebuild** — recreate them by hand alongside the gunicorn drop-in:
+
+| Path | Purpose |
+|---|---|
+| `/etc/systemd/system/yt2mp3-healthcheck.service` | oneshot wrapper, `SuccessExitStatus=0 1` so an expected unhealthy exit doesn't mark the unit failed |
+| `/etc/systemd/system/yt2mp3-healthcheck.timer` | the 15-minute schedule |
+| `/etc/yt2mp3-alerts.env` | `BOT_TOKEN` and `CHAT_ID` for the Telegram bot, mode `600`, root-owned |
+
+The alert bot (`@audiograb_alerts_bot`) is deliberately separate from the bot used by other projects. This server runs user-submitted URLs through yt-dlp and ffmpeg — the reason the service was de-rooted in the first place — so a token stored here should be able to do nothing worse, if it ever leaked, than message its owner. Rotating it is one **Revoke** in BotFather plus an edit to that file.
 
 ## OS Maintenance
 
