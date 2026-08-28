@@ -110,7 +110,7 @@ All Python dependencies are pinned exactly in `requirements.txt` (an exact snaps
 | # | Source | Action | Check | Time |
 |---|--------|--------|-------|------|
 | 1 | YouTube | paste the YouTube reference link below, download AAC | preview shows title/thumbnail/duration; AAC stream-copies (no re-encode note); cover art embedded | ~2 min |
-| 2 | TikTok | paste the TikTok reference link, download MP3 | preview ok; download completes and plays | ~2 min |
+| 2 | TikTok | paste the TikTok reference link, download MP3 | **a failure here proves nothing about the bump** — TikTok succeeds only ~20-25% of the time from this server's IP regardless of yt-dlp version. Retry a few times; treat it as a pass if any attempt works, and don't block a release on it | ~2 min |
 | 3 | SoundCloud | paste the SoundCloud reference link, download AAC | preview ok; download completes | ~2 min |
 | 4 | VK | paste the VK reference link, download Opus | preview ok; download completes — VK is currently the least stable extractor, don't skip this one | ~2 min |
 | 5 | any source | enable "Обрезать фрагмент", download a short trim | output duration matches the trimmed range — exercises `-ss`/`-to` + forced re-encode, a separate code path from a plain download | ~1–2 min |
@@ -208,7 +208,7 @@ For manual post-deploy/post-infra checks against prod (not automated, not a test
 Verified-stable references, one per source (used by the Dependency Versioning regression checklist above — pick official/large-account content specifically because it's the least likely to vanish, not because it's more "correct" than any other video):
 
 - **YouTube**: `https://www.youtube.com/watch?v=9bZkp7q19f0` (PSY — Gangnam Style; long-running, extremely popular upload, very unlikely to be taken down) — confirmed working 2026-07-21 and 2026-07-22.
-- **TikTok**: `https://www.tiktok.com/@tiktok/video/7666214645006421278` (TikTok's own official account, about the For You Feed — platform's own content, essentially never gets taken down) — confirmed working 2026-07-27.
+- **TikTok**: `https://www.tiktok.com/@tiktok/video/7675779662903069983` (TikTok's own official account) — confirmed extracting 2026-08-28. Replaced the previous link, which had gone dead: it returned "no video formats found", which looks exactly like an extractor break and cost real time to tell apart from one. Re-verify this one before trusting a checklist run, and if it has died too, pull a current id with `yt-dlp --flat-playlist --playlist-end 1 --print "%(id)s" https://www.tiktok.com/@tiktok` rather than guessing.
 - **SoundCloud**: `https://soundcloud.com/marshmellomusic/alone` (Marshmello — Alone, official verified artist account, uploaded 2016, 74M+ plays) — confirmed working 2026-07-27.
 - **VK**: `https://vkvideo.ru/video-18403220_456239696` (Руслан Усачев — large, long-established Russian creator's official public; content is news-commentary so it'll read as dated, but the channel itself is the stable part, not the topic) — confirmed working end-to-end (real download via the live API) 2026-07-27. VK's extractor is currently the least stable of the four (see the `vk.py` subtitle crash noted in `architecture.md` → Data Flow), so don't skip this one when regression-testing.
 
