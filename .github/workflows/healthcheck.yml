@@ -63,9 +63,21 @@ jobs:
             # something is writing that will not stop on its own.
             [ -n "$DOWNLOADS_MB" ] && [ "$DOWNLOADS_MB" -ge 3000 ] && note "downloads/ holds ${DOWNLOADS_MB}MB"
 
-            # At rest the worker sits at 40-100MB; a normal download peaks well
-            # under 200MB. The stuck-livestream state held 852MB.
-            [ "$MEM_MB" != "unknown" ] && [ "$MEM_MB" -ge 600 ] && note "worker memory is ${MEM_MB}MB"
+            # Memory is the weakest signal here, so it is tuned to fire only on
+            # clearly pathological state. Observed: 36-126MB at rest, ~70MB
+            # during an ordinary download, but 755MB during a legitimate large
+            # one (2026-08-27, no crash, back to 126MB afterwards) versus 852MB
+            # held for over an hour by the stuck-livestream incident. That
+            # leaves a band of roughly 100MB between "busy" and "broken", and
+            # this reads MemoryCurrent, so a check landing mid-download sees the
+            # spike. 600MB sat below the legitimate peak and would have cried
+            # wolf; 900MB would sit above the incident and miss it.
+            #
+            # Do not treat this as the primary detector. In the incident the
+            # unambiguous signals were downloads/ at 6.7GB against a 3GB
+            # threshold and the disk at 86% — both orders of magnitude clear of
+            # normal, where this one is a coin-flip away from it.
+            [ "$MEM_MB" != "unknown" ] && [ "$MEM_MB" -ge 800 ] && note "worker memory is ${MEM_MB}MB"
 
             [ "$CRASHES" -gt 0 ] && note "${CRASHES} worker timeout/SIGKILL entries in the last hour"
 
