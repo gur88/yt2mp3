@@ -80,6 +80,14 @@ The `pip install` step is what makes `requirements.txt` the actual source of tru
 | `SSH_USER` | `root` | deploy.yml |
 | `SSH_PRIVATE_KEY` | private key matching a public key in the server's `~/.ssh/authorized_keys` for `root` | deploy.yml |
 
+**The server pulls over SSH, not HTTPS.** `origin` is `git@github.com:gur88/yt2mp3.git`, authenticated by a read-only deploy key at `/root/.ssh/github_deploy` and selected through `core.sshCommand` in that clone's own config, so the key is scoped to this repository rather than to root's SSH generally. The public half is registered under repo Settings → Deploy keys, **without** write access: the server only ever needs to read, and this box runs user-submitted URLs through yt-dlp and ffmpeg, so a key stored here should not be able to write to the repository if it ever leaked.
+
+This replaced anonymous HTTPS on 2026-09-02, after deploys began failing with `could not read Username for 'https://github.com'`. That message is misleading — it looks like the repository went private or the config broke. Neither: the API and a plain `curl` to the git endpoint both returned 200 anonymously, and three consecutive `git ls-remote` attempts gave **OK, FAILED, FAILED**. Intermittency is what settles it, since configuration cannot work every other try. GitHub was throttling anonymous git access from this IP, which had made roughly a dozen pulls that day. Git receives a 401 and falls back to asking for a username. Authenticated requests are not subject to that limit, so the key removes the cause rather than working around it.
+
+The key pair and the `core.sshCommand` setting live on the box, not in git, so a server rebuild takes them with it — the same trap as the gunicorn drop-in and the monitoring pieces listed under Monitoring below. Recreating means generating a key, registering the public half as a deploy key again, and re-pointing `origin`.
+
+Symptom worth recognising: the deploy workflow **passes** while this happens. `git pull` fails inside the SSH session, the step's exit status does not surface it, and the service restarts happily on unchanged code — so HEAD on the server silently stops advancing while every push looks green. Check `git log -1` on the box when a change seems not to have taken effect.
+
 **Manual deploy** (if CI is down or for emergency fixes):
 
 ```bash
