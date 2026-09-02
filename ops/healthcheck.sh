@@ -25,20 +25,33 @@ STATE_FILE=/var/lib/yt2mp3-healthcheck.state
 
 FAILED=0
 BREACHES=""
+KEYS=""
+# $1 is a stable key, $2 the human text. They are separate because the state
+# used for de-duplication is built from the keys alone: the text carries the
+# current reading, and hashing that made every fluctuating value look like a
+# new problem. Two alerts arrived minutes apart on 2026-09-02 for the same
+# ongoing condition, differing only in "836MB" versus "851MB".
 note() {
-    echo "UNHEALTHY: $1"
-    BREACHES="${BREACHES}• $1
+    echo "UNHEALTHY: $2"
+    BREACHES="${BREACHES}• $2
 "
+    KEYS="${KEYS}$1,"
     FAILED=1
 }
 
 DISK_PCT=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 DOWNLOADS_MB=$(du -sm /var/www/yt2mp3/downloads 2>/dev/null | cut -f1)
-MEM_RAW=$(systemctl show yt2mp3 -p MemoryCurrent --value)
-case "$MEM_RAW" in
-    ''|*[!0-9]*) MEM_MB="unknown" ;;
-    *)           MEM_MB=$((MEM_RAW / 1024 / 1024)) ;;
-esac
+# `anon` from the cgroup, deliberately not systemd's MemoryCurrent. That figure
+# includes the page cache, which grows with the sheer volume of file I/O a job
+# performs — so it rises on exactly the large *legitimate* downloads this is not
+# meant to flag. Measured 2026-09-02 mid-way through an ordinary audiobook
+# conversion: MemoryCurrent read 830MB, of which 655MB was page cache the kernel
+# drops on demand, and only 159MB was real process memory. Two false alarms came
+# out of that before the metric was changed, and raising the threshold could
+# never have fixed it — the wrong thing was being measured.
+CGROUP=/sys/fs/cgroup/system.slice/yt2mp3.service
+MEM_MB=$(awk '/^anon /{printf "%d", $2/1024/1024}' "$CGROUP/memory.stat" 2>/dev/null)
+[ -z "$MEM_MB" ] && MEM_MB="unknown"
 CRASHES=$(journalctl -u yt2mp3 --since "-70min" --no-pager 2>/dev/null \
           | grep -cE "WORKER TIMEOUT|was sent SIGKILL" || true)
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 http://127.0.0.1:5000/ || echo "000")
@@ -48,24 +61,25 @@ echo "$SUMMARY"
 
 # Disk went from comfortable to roughly fifteen minutes from full in under an
 # hour on 2026-08-25, so this wants headroom rather than a last-moment warning.
-[ "$DISK_PCT" -ge 80 ] && note "диск заполнен на ${DISK_PCT}%"
+[ "$DISK_PCT" -ge 80 ] && note "disk" "диск заполнен на ${DISK_PCT}%"
 
 # downloads/ is transient: the janitor sweeps it hourly and it normally sits
 # near empty. Sustained gigabytes means something is writing that will not stop
 # on its own — during the incident this read 6.7GB.
-[ -n "$DOWNLOADS_MB" ] && [ "$DOWNLOADS_MB" -ge 3000 ] && note "downloads/ занимает ${DOWNLOADS_MB}MB"
+[ -n "$DOWNLOADS_MB" ] && [ "$DOWNLOADS_MB" -ge 3000 ] && note "downloads" "downloads/ занимает ${DOWNLOADS_MB}MB"
 
-# The weakest signal, tuned to fire only on clearly pathological state: 36-126MB
-# at rest, but 755MB during a legitimate large download versus 852MB held for
-# over an hour while stuck. Roughly a 100MB band, so treat disk and downloads/
-# as the real detectors.
-[ "$MEM_MB" != "unknown" ] && [ "$MEM_MB" -ge 800 ] && note "память воркера ${MEM_MB}MB"
+# Now that this measures anon rather than page cache, the two states are far
+# apart: 159MB while genuinely busy converting a 700MB audiobook, against 676MB
+# with threads stuck on a livestream (2026-08-25). A four-fold gap, where
+# MemoryCurrent left barely a hundred megabytes between them and could not be
+# tuned into a usable signal at any threshold.
+[ "$MEM_MB" != "unknown" ] && [ "$MEM_MB" -ge 400 ] && note "memory" "память воркера ${MEM_MB}MB"
 
-[ "$CRASHES" -gt 0 ] && note "воркер падал ${CRASHES} раз за час"
+[ "$CRASHES" -gt 0 ] && note "crashes" "воркер падал ${CRASHES} раз за час"
 
-systemctl is-active --quiet yt2mp3 || note "сервис не запущен"
+systemctl is-active --quiet yt2mp3 || note "inactive" "сервис не запущен"
 
-[ "$HTTP" != "200" ] && note "главная отвечает HTTP ${HTTP}"
+[ "$HTTP" != "200" ] && note "http" "главная отвечает HTTP ${HTTP}"
 
 # --- notification -------------------------------------------------------
 # Only on a *change* of state. A breach that persists for hours would otherwise
@@ -74,7 +88,12 @@ systemctl is-active --quiet yt2mp3 || note "сервис не запущен"
 # ambiguous, since it also describes a monitor that has quietly stopped running.
 if [ "$NOTIFY" -eq 1 ]; then
     if [ "$FAILED" -eq 1 ]; then
-        NEW_STATE=$(printf '%s' "$BREACHES" | md5sum | cut -c1-32)
+        # Keys, not the rendered text: the text carries the live reading, so
+        # hashing it made a drifting number ("836MB" then "851MB") read as a
+        # brand-new problem and alert again. Kept unhashed — it is short, and a
+        # state file saying "disk,memory," is worth more when debugging than a
+        # hash. A genuinely new *kind* of breach still changes it and re-alerts.
+        NEW_STATE="$KEYS"
         TEXT="⚠️ AudioGrab: проблема
 
 ${BREACHES}
