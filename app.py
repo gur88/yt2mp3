@@ -252,8 +252,12 @@ _EXTRACTION_ERRORS: tuple[tuple[str, object, str], ...] = (
     ("unsupported_url",
      lambda m: "Unsupported URL" in m,
      "Такой тип ссылки не поддерживается. Убедитесь, что это прямая ссылка на видео или трек."),
+    # Two wordings for one condition. VK says "signed-in users" where the rule
+    # was written against "registered users", so six of these in five days got
+    # the generic fallback instead of the accurate message that already existed
+    # for exactly this case (2026-08-31..09-04).
     ("login_required",
-     lambda m: "only available for registered users" in m,
+     lambda m: "only available for registered users" in m or "only available to signed-in users" in m,
      "Видео доступно только авторизованным пользователям на сайте-источнике — сервис не может его скачать."),
     ("age_restricted",
      lambda m: "confirm your age" in m,
@@ -276,6 +280,22 @@ _EXTRACTION_ERRORS: tuple[tuple[str, object, str], ...] = (
     ("server_network",
      lambda m: "Temporary failure in name resolution" in m,
      "Временная проблема с сетью на сервере. Попробуйте ещё раз через минуту."),
+    ("no_formats",
+     lambda m: "No video formats found" in m,
+     "Источник не отдал ни одной дорожки для скачивания. Обычно так бывает, "
+     "если видео удалено или доступно не всем."),
+    # yt-dlp's own extractor crashing rather than reporting a failure: a Python
+    # exception escapes instead of a DownloadError. Matched on the two
+    # signatures actually seen — Odnoklassniki's extractor passing an
+    # already-parsed dict into a JSON parser, and vk.py calling .split() on a
+    # null subtitle title. Neither message names its source, so this stays
+    # deliberately generic rather than pretending to identify one; any extractor
+    # breaking this way means the same thing to the user, and the code makes the
+    # frequency visible on the dashboard.
+    ("extractor_crashed",
+     lambda m: "the JSON object must be str" in m or "'NoneType' object has no attribute 'split'" in m,
+     "Сайт-источник изменился, и обработчик для него сейчас не работает. "
+     "Это на нашей стороне — со ссылкой всё в порядке."),
 )
 
 
