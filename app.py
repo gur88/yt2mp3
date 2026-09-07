@@ -280,6 +280,14 @@ _EXTRACTION_ERRORS: tuple[tuple[str, object, str], ...] = (
     ("server_network",
      lambda m: "Temporary failure in name resolution" in m,
      "Временная проблема с сетью на сервере. Попробуйте ещё раз через минуту."),
+    # Kept after fixing the cause (the output template now caps the title), as
+    # a backstop: the cap is in characters while the limit is in bytes, so a
+    # title of 80 four-byte characters could still overflow. If that ever
+    # happens it should read as ours on the dashboard, not as a bad link.
+    ("filename_too_long",
+     lambda m: "File name too long" in m,
+     "Не удалось сохранить файл — слишком длинное название у видео. "
+     "Это на нашей стороне, со ссылкой всё в порядке."),
     ("no_formats",
      lambda m: "No video formats found" in m,
      "Источник не отдал ни одной дорожки для скачивания. Обычно так бывает, "
@@ -639,7 +647,16 @@ def run_download(job_id: str, url: str, fmt: str, quality: int, ip: str,
                   trim_start: float | None = None, trim_end: float | None = None,
                   custom_title: str | None = None, custom_artist: str | None = None,
                   normalize: bool = False) -> None:
-    output_template = str(OUTPUT_DIR / f"{job_id}_%(title)s.%(ext)s")
+    # The title is capped because NAME_MAX is 255 *bytes*, not characters, and
+    # Cyrillic costs two bytes each — a title of roughly 130 characters already
+    # overflows. yt-dlp does trim the base name to fit on its own, but then
+    # appends its own suffix for fragmented downloads (`.part-Frag1000.part`),
+    # which pushes it back over: two jobs on 2026-09-05 failed with ENAMETOOLONG
+    # and retried 96 times each, 192 of the 218 errors that week. 80 characters
+    # leaves roughly 60 bytes of headroom for the job id, extension and that
+    # suffix. Only the on-disk name is shortened — what the user receives comes
+    # from `display_title` further down, so the download keeps its full name.
+    output_template = str(OUTPUT_DIR / f"{job_id}_%(title).80s.%(ext)s")
     downloaded_file: list[Path | None] = [None]
 
     def progress_hook(d):
