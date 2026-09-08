@@ -864,7 +864,7 @@ def get_info():
     url  = (data.get("url") or "").strip()
 
     if not url:
-        return jsonify({"error": "Нужно указать ссылку."}), 400
+        return jsonify({"error": "Нужно указать ссылку.", "error_code": "empty_url"}), 400
 
     with info_cache_lock:
         cached = info_cache.get(url)
@@ -921,9 +921,9 @@ def start_download():
     quality = int(data.get("quality", 192))
 
     if not url:
-        return jsonify({"error": "Нужно указать ссылку."}), 400
+        return jsonify({"error": "Нужно указать ссылку.", "error_code": "empty_url"}), 400
     if fmt not in FORMATS:
-        return jsonify({"error": "Неизвестный формат."}), 400
+        return jsonify({"error": "Неизвестный формат.", "error_code": "bad_format"}), 400
 
     validation_error = validate_url(url)
     if validation_error:

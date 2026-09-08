@@ -303,6 +303,9 @@ async function fetchPreview(url) {
     previewTitleInput.value = data.title || '';
     previewArtistInput.value = data.artist || '';
     previewBox.classList.add('visible');
+    // Funnel middle: a shown preview is the denominator for the preview
+    // failure rate and for how many previews go on to a download.
+    trackEvent('preview_ok', { source: getSourceLabel(url) });
 
     currentDuration = typeof data.duration === 'number' ? data.duration : null;
     if (currentDuration && !trimEndInput.value.trim()) {
@@ -312,6 +315,10 @@ async function fetchPreview(url) {
   } catch {
     if (requestId === previewRequestId) {
       previewLoading.classList.remove('visible');
+      // The request itself failed (offline, DNS, CORS) — no server error_code
+      // to forward, but still a preview that never showed, so it belongs in
+      // the same event as every other preview failure.
+      trackEvent('preview_error', { source: getSourceLabel(url), reason: 'network' });
       showPreviewError('Не удалось проверить ссылку. Проверьте соединение и попробуйте снова.');
     }
   }
@@ -535,6 +542,11 @@ startBtn.addEventListener('click', async () => {
       throw new Error(data.error);
     }
     jobId = data.job_id;
+    // Funnel middle: the server accepted the job. Sits between preview_ok and
+    // job_done/job_error so the preview->download drop-off is visible, and is
+    // the true denominator for the download-stage error rate (a 429 returns
+    // above this, so a rate-limited attempt is correctly not counted).
+    trackEvent('download_started', { source: getSourceLabel(url), format: payload.format });
   } catch (err) {
     setError(err.message);
     startBtn.disabled = false;

@@ -245,8 +245,10 @@ FAQ items are native `<details>`/`<summary>`, but with custom JS instead of defa
 
 Custom Umami events (`window.umami.track(name, data)`) give per-source error tracking a graph instead of relying on user complaints — the realistic failure mode here is source-specific (e.g. YouTube tightening anti-bot on datacenter IPs, or TikTok/VK breaking their extractor after a site update).
 
-Four events, all fired client-side from `static/app.js`:
-- `preview_error` — `/api/info` returned an error (earliest signal of an extractor problem, before the user even attempts a download)
+Six events, all fired client-side from `static/app.js`:
+- `preview_ok` — `/api/info` returned a usable preview and it was shown. The denominator the two rates below need: `preview_error / (preview_ok + preview_error)` is the real preview failure rate, and `download_started / preview_ok` is how many previews go on to a download
+- `preview_error` — `/api/info` returned an error, or the request itself failed (`reason: network`). Earliest signal of an extractor problem, before the user even attempts a download
+- `download_started` — `/api/download` accepted the job (a job id came back). Sits between `preview_ok` and `job_done`/`job_error`; a 429 rate-limit returns before this fires, so a throttled attempt is correctly not counted. Carries `format`
 - `job_error` — `/api/status` polling reported a failed job, or the job vanished server-side (a restart mid-download; reported as `reason: job_vanished`, which the server can't report itself since the job record is exactly what is gone)
 - `job_done` — the job completed successfully; also carries `format` (mp3/aac/opus) — free product-usage insight, and the denominator for computing an error *rate* per source (raw error counts alone just track traffic, not health)
 - `share_used` — the Android Web Share sheet was invoked on a finished file (see Blob-Once Download/Share Pattern)
