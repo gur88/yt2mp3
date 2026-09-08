@@ -76,11 +76,36 @@
       (`reason: network`).
 - [x] Формат в `job_done` уже трекался (`payload.format`).
 - [ ] Возвраты: сегмент «returning» в Umami, начать смотреть.
-- [ ] Ритуал: каждый понедельник 15 мин — GSC + Umami, в журнал 3 числа:
-      клики/день, success rate по источникам, % возвратов.
+- [x] Ритуал автоматизирован со стороны Umami: `ops/umami_digest.py` шлёт
+      недельный срез в Telegram по понедельникам (systemd timer на боксе,
+      unit-файлы в `ops/systemd/`). Вручную остаётся только GSC.
 
 **Готово, когда:** отвечаешь на «сколько возвращается», «что падает»,
 «где бросают» без гадания.
+
+### Установка дайджеста на боксе (разово, по SSH root)
+
+```sh
+sudo grep -E 'BOT_TOKEN|CHAT_ID' /etc/yt2mp3-alerts.env   # взять значения
+
+sudo tee /etc/yt2mp3-digest.env >/dev/null <<'EOF'
+UMAMI_USERNAME=admin
+UMAMI_PASSWORD=<пароль от analytics.audiograb.ru>
+UMAMI_URL=http://127.0.0.1:3001
+UMAMI_WEBSITE=19460776-616d-4b04-888d-509b1d7ebba3
+BOT_TOKEN=<из yt2mp3-alerts.env>
+CHAT_ID=<из yt2mp3-alerts.env>
+EOF
+sudo chown yt2mp3:yt2mp3 /etc/yt2mp3-digest.env && sudo chmod 600 /etc/yt2mp3-digest.env
+
+sudo cp /var/www/yt2mp3/ops/systemd/umami-digest.service /etc/systemd/system/
+sudo cp /var/www/yt2mp3/ops/systemd/umami-digest.timer   /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now umami-digest.timer
+
+sudo systemctl start umami-digest.service   # проверить: должно прийти в Telegram
+journalctl -u umami-digest.service -n 20 --no-pager
+```
 
 ---
 

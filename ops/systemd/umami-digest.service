@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly Umami digest to Telegram
+Wants=network-online.target
+After=network-online.target
+
+# Reference copy — the live unit is installed at /etc/systemd/system/ by hand
+# (see docs/roadmap-2026-q4.md / deployment.md). Kept in git so a server
+# rebuild can re-apply it instead of reconstructing it from memory.
+
+[Service]
+Type=oneshot
+User=yt2mp3
+ExecStart=/var/www/yt2mp3/venv/bin/python /var/www/yt2mp3/ops/umami_digest.py 7 /etc/yt2mp3-digest.env

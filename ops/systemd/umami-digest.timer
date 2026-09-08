@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Umami digest every Monday morning
+
+# Reference copy — install by hand at /etc/systemd/system/ (see
+# docs/roadmap-2026-q4.md). Persistent=true so a Monday the box was off
+# still produces a digest on the next boot.
+
+[Timer]
+OnCalendar=Mon 09:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
