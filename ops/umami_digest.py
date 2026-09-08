@@ -160,6 +160,13 @@ def main():
     jerr_c, _ = split("job_error")
     dstart_c, _ = split("download_started")
 
+    npok, ndstart, ndone = len(pok_c), len(dstart_c), len(done_c)
+    # preview_ok / download_started ship 2026-09-08. Until a full window has
+    # passed they undercount against job_done, so any rate built on them reads
+    # as a wild >100%. Trust the funnel rates only once the counts sit in the
+    # order a real funnel must: preview_ok >= download_started >= job_done.
+    funnel_ready = npok >= ndstart >= ndone
+
     # per-source health, current window
     src_lines = []
     for src in ("vk", "youtube", "tiktok", "soundcloud"):
@@ -169,10 +176,9 @@ def main():
         jerr = sum(1 for e in jerr_c if source_of(e) == src)
         if pok + perr + done + jerr == 0:
             continue
-        # preview_ok / download_started ship 2026-09-08; until a full window
-        # has passed, a window with preview_error but no preview_ok would
-        # read "превью 0%", which is a data gap, not a failure spike.
-        prev = pct(pok, pok + perr) if pok else "н/д"
+        # a finished download implies a shown preview, so pok < done means the
+        # preview_ok stream for this source has not caught up yet
+        prev = pct(pok, pok + perr) if pok >= done and pok else "н/д"
         src_lines.append(
             f"  {src}: превью {prev}, "
             f"загрузка {pct(done, done + jerr)} (n={done + jerr})")
@@ -182,13 +188,18 @@ def main():
         "",
         f"Посетители: {cur_visitors}{delta(cur_visitors, prev_visitors)}",
         f"Визиты: {cur_visits}{delta(cur_visits, prev_visits)}",
-        f"Скачано: {len(done_c)}{delta(len(done_c), len(done_p))}",
+        f"Скачано: {ndone}{delta(ndone, len(done_p))}",
         "",
         "Воронка:",
-        f"  preview_ok {len(pok_c)} → download {len(dstart_c)} "
-        f"({pct(len(dstart_c), len(pok_c))}) → done {len(done_c)} "
-        f"({pct(len(done_c), len(dstart_c))})",
     ]
+    if funnel_ready:
+        lines.append(
+            f"  preview_ok {npok} → download {ndstart} "
+            f"({pct(ndstart, npok)}) → done {ndone} ({pct(ndone, ndstart)})")
+    else:
+        lines.append(f"  preview_ok {npok} · download {ndstart} · done {ndone}")
+        lines.append("  (preview_ok / download_started собираются с 8 сен — "
+                     "проценты позже)")
     if src_lines:
         lines += ["", "Здоровье по источникам:"] + src_lines
     lines += ["", f"Полная выгрузка: ops/umami_export.py {days}"]
